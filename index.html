@@ -59,7 +59,7 @@
         
         /* Estilo para a lista de sugestões */
         .suggestion-list {
-            max-height: 250px;
+            max-height: 300px;
             overflow-y: auto;
         }
         .suggestion-list::-webkit-scrollbar {
@@ -145,13 +145,6 @@
             { id: 'internacional', label: 'A - ALTERNATIVOS', color: '#EF4444', icon: Icons.Globe, desc: 'Mercado Global' }
         ];
 
-        // Tickers populares como Fallback imediato
-        const FALLBACK_TICKERS = [
-            "PETR4", "VALE3", "ITUB4", "BBDC4", "BBAS3", "ABEV3", "ITSA4", "B3SA3", "WEGE3", "MGLU3", "RENT3", "PRIO3",
-            "HGLG11", "MXRF11", "KNRI11", "XPML11", "VISC11", "XPLG11", "HGRU11", "BCFF11", "VILG11", "IRDM11",
-            "AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSLA", "NVDA", "NFLX", "IVV", "VOO", "QQQ"
-        ];
-
         function App() {
             const [user, setUser] = useState(null);
             const [activeTab, setActiveTab] = useState('home');
@@ -162,8 +155,8 @@
             const [isSyncing, setIsSyncing] = useState(false);
             const [newAsset, setNewAsset] = useState({ name: '', qty: '', avgPrice: '', currentPrice: '' });
             
-            // Lista de Tickers Sincronizada da API
-            const [apiTickers, setApiTickers] = useState(FALLBACK_TICKERS);
+            // Lista de Tickers Sincronizada da API (Objectos com ticker e nome)
+            const [apiTickers, setApiTickers] = useState([]);
             const [suggestions, setSuggestions] = useState([]);
             const [showSuggestions, setShowSuggestions] = useState(false);
             const suggestionRef = useRef(null);
@@ -179,9 +172,8 @@
                         const res = await fetch(`${DM_API_BASE}/tickers?token=${DM_TOKEN}`);
                         if (res.ok) {
                             const data = await res.json();
-                            // Mescla tickers da API com os populares, removendo duplicados
-                            const tickers = [...new Set([...FALLBACK_TICKERS, ...data.map(item => item.ticker)])];
-                            setApiTickers(tickers);
+                            // Data vem como array de objetos: { ticker, name }
+                            setApiTickers(data);
                         }
                     } catch (e) { 
                         console.error("Erro ao carregar lista de ativos:", e); 
@@ -291,21 +283,24 @@
                 if (user) await FSDK.deleteDoc(FSDK.doc(db, 'artifacts', appId, 'users', user.uid, 'assets', id));
             };
 
-            // Lógica de Autocomplete
+            // Lógica de Autocomplete Robusta (Pesquisa por ticker ou nome)
             const handleTickerChange = (val) => {
-                const upperVal = val.toUpperCase();
-                setNewAsset({...newAsset, name: upperVal});
-                if (upperVal.length > 0) {
-                    // Filtra ativos que contenham ou comecem com o texto digitado
+                const term = val.toUpperCase();
+                setNewAsset({...newAsset, name: term});
+                
+                if (term.length > 0) {
                     const filtered = apiTickers
-                        .filter(t => t.includes(upperVal))
+                        .filter(item => 
+                            item.ticker.includes(term) || 
+                            item.name.toUpperCase().includes(term)
+                        )
                         .sort((a, b) => {
-                            // Prioriza os que começam exatamente com a letra
-                            if (a.startsWith(upperVal) && !b.startsWith(upperVal)) return -1;
-                            if (!a.startsWith(upperVal) && b.startsWith(upperVal)) return 1;
-                            return a.localeCompare(b);
+                            // Prioridade para tickers que começam com o termo
+                            if (a.ticker.startsWith(term) && !b.ticker.startsWith(term)) return -1;
+                            if (!a.ticker.startsWith(term) && b.ticker.startsWith(term)) return 1;
+                            return a.ticker.localeCompare(b.ticker);
                         })
-                        .slice(0, 10);
+                        .slice(0, 15); // Aumentado para 15 sugestões
                     
                     setSuggestions(filtered);
                     setShowSuggestions(filtered.length > 0);
@@ -368,7 +363,7 @@
                                 <h1 className="font-black tracking-tighter text-xl uppercase text-white">R.I <span className="text-cyan-500 text-white">SISTEMA</span></h1>
                             </div>
                             <div className="flex items-center gap-3">
-                                {isSyncing && <div className="text-[10px] font-bold text-cyan-400 animate-pulse-cyan uppercase tracking-widest">Sincronizando Dados de Mercado...</div>}
+                                {isSyncing && <div className="text-[10px] font-bold text-cyan-400 animate-pulse-cyan uppercase tracking-widest">Mercado em Tempo Real...</div>}
                                 <Icons.Cloud size={20} className={isSyncing ? "text-cyan-500 animate-pulse" : "text-emerald-500/50"} />
                             </div>
                         </div>
@@ -448,12 +443,12 @@
 
                                 <form onSubmit={addAsset} className="bg-zinc-900/20 border border-zinc-900 p-8 rounded-[2.5rem] mb-10 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 items-end text-white premium-shadow text-white relative">
                                     <div className="space-y-2 relative" ref={suggestionRef}>
-                                        <label className="text-[9px] font-black text-zinc-600 uppercase ml-3 tracking-widest">Ticker (Dados de Mercado)</label>
+                                        <label className="text-[9px] font-black text-zinc-600 uppercase ml-3 tracking-widest">Ticker ou Empresa</label>
                                         <div className="relative">
                                             <input 
                                                 required 
                                                 type="text" 
-                                                placeholder="EX: PETR4" 
+                                                placeholder="EX: PETR4 ou PETROBRAS" 
                                                 autoComplete="off"
                                                 value={newAsset.name} 
                                                 onChange={e => handleTickerChange(e.target.value)} 
@@ -465,21 +460,21 @@
                                             </div>
                                         </div>
                                         
-                                        {/* Lista de Sugestões / Autocomplete */}
+                                        {/* Lista de Sugestões / Autocomplete com Nomes das Empresas */}
                                         {showSuggestions && (
                                             <div className="absolute top-full left-0 right-0 mt-2 bg-[#0A0A0A] border border-zinc-800 rounded-2xl overflow-hidden z-[100] shadow-2xl animate-in fade-in zoom-in-95 duration-200">
                                                 <ul className="suggestion-list">
-                                                    {suggestions.map((ticker, idx) => (
+                                                    {suggestions.map((item, idx) => (
                                                         <li 
                                                             key={idx} 
-                                                            onClick={() => selectSuggestion(ticker)} 
-                                                            className="px-6 py-4 hover:bg-cyan-500/10 cursor-pointer font-black text-xs text-zinc-300 border-b border-zinc-900 last:border-none flex justify-between items-center transition-colors group"
+                                                            onClick={() => selectSuggestion(item.ticker)} 
+                                                            className="px-6 py-4 hover:bg-cyan-500/10 cursor-pointer border-b border-zinc-900 last:border-none flex flex-col transition-colors group"
                                                         >
-                                                            <span className="flex items-center gap-3">
-                                                                <div className="w-1.5 h-1.5 rounded-full bg-cyan-500 group-hover:scale-150 transition-transform"></div>
-                                                                {ticker}
-                                                            </span>
-                                                            <span className="text-[8px] text-zinc-700 uppercase tracking-widest bg-zinc-900/50 px-2 py-1 rounded">B3/MERCADO</span>
+                                                            <div className="flex justify-between items-center mb-1">
+                                                                <span className="font-black text-sm text-cyan-400 group-hover:text-white transition-colors">{item.ticker}</span>
+                                                                <span className="text-[8px] text-zinc-700 uppercase tracking-widest bg-zinc-900/50 px-2 py-0.5 rounded">B3 OFICIAL</span>
+                                                            </div>
+                                                            <span className="text-[10px] text-zinc-500 group-hover:text-zinc-300 transition-colors truncate">{item.name}</span>
                                                         </li>
                                                     ))}
                                                 </ul>
