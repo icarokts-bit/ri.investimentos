@@ -117,8 +117,8 @@
         };
 
         const appId = "ri-investimentos-final-tribo";
-        const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent";
-        const apiKey = ""; 
+        // Chave BrAPI fornecida pelo utilizador
+        const BRAPI_TOKEN = "kV6yXxdJXBydFXERkYgfSf";
 
         const STRATEGY = [
             { id: 'acoes', label: 'A - AÇÕES', color: '#00D4C5', icon: Icons.TrendingUp, desc: 'Bolsa Brasileira' },
@@ -127,6 +127,7 @@
             { id: 'internacional', label: 'A - ALTERNATIVOS', color: '#EF4444', icon: Icons.Globe, desc: 'Mercado Global' }
         ];
 
+        // Lista Expandida para Autocomplete B3
         const POPULAR_TICKERS = [
             "PETR4", "PETR3", "VALE3", "ITUB4", "BBDC4", "BBDC3", "ABEV3", "BBAS3", "ITSA4", "B3SA3", "WEGE3", "MGLU3", "PRIO3", "SLCE3",
             "RENT3", "GGBR4", "CSNA3", "SUZB3", "JBSS3", "RAIL3", "RADL3", "EQTL3", "CPLE6", "TRPL4", "VIVT3", "TIMS3", "SBSP3", "ELET3", 
@@ -187,61 +188,37 @@
                 return () => document.removeEventListener("mousedown", handleClickOutside);
             }, []);
 
+            // --- SINCRONIZAÇÃO COM BRAPI ---
             const syncPrices = useCallback(async (forcedTab = null) => {
                 const tabToSync = forcedTab || activeTab;
-                if (!user || isSyncing || tabToSync === 'home') return;
+                if (!user || isSyncing || tabToSync === 'home' || tabToSync === 'caixa') return;
                 
                 const tabAssets = assets.filter(a => a.category === tabToSync);
                 if (tabAssets.length === 0) return;
                 
                 setIsSyncing(true);
                 try {
-                    const tickersSearch = tabAssets.map(a => {
-                        const name = a.name.toUpperCase();
-                        if ((tabToSync === 'acoes' || tabToSync === 'realestate') && !name.includes('.')) {
-                            return `${name}.SA`;
-                        }
-                        return name;
-                    });
+                    const tickersList = tabAssets.map(a => a.name.toUpperCase()).join(',');
+                    const response = await fetch(
+                        `https://brapi.dev/api/quote/${tickersList}?token=${BRAPI_TOKEN}`
+                    );
 
-                    const prompt = `Aja como um terminal financeiro. Use o Google Search para encontrar o PREÇO ATUAL (Última Cotação) de fechamento ou tempo real na B3 para: ${tickersSearch.join(', ')}. 
-                    Se for brasileiro, garanta o valor em Reais (BRL). 
-                    Responda EXCLUSIVAMENTE com um JSON puro no formato: {"TICKER": valor_float}. 
-                    Exemplo: {"PETR4": 36.50, "VALE3": 62.10}. Use os tickers originais como chaves.`;
-
-                    const res = await fetch(`${GEMINI_URL}?key=${apiKey}`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ 
-                            contents: [{ parts: [{ text: prompt }] }], 
-                            tools: [{ google_search: {} }], 
-                            generationConfig: { responseMimeType: "application/json" } 
-                        })
-                    });
+                    if (!response.ok) throw new Error("Erro na BrAPI");
+                    const data = await response.json();
                     
-                    const data = await res.json();
-                    const textContent = data.candidates?.[0]?.content?.parts?.[0]?.text;
-                    
-                    if (textContent) {
-                        const jsonStr = textContent.match(/\{[\s\S]*\}/)?.[0] || textContent;
-                        const pricesMap = JSON.parse(jsonStr);
-                        
-                        for (const asset of tabAssets) {
-                            const assetKey = asset.name.toUpperCase();
-                            const priceFound = pricesMap[assetKey] || 
-                                               pricesMap[assetKey + '.SA'] || 
-                                               pricesMap[assetKey.replace('.SA', '')];
-
-                            if (priceFound && typeof priceFound === 'number' && priceFound > 0) {
+                    if (data.results && data.results.length > 0) {
+                        for (const result of data.results) {
+                            const asset = tabAssets.find(a => a.name.toUpperCase() === result.symbol.toUpperCase());
+                            if (asset && result.regularMarketPrice) {
                                 await FSDK.updateDoc(FSDK.doc(db, 'artifacts', appId, 'users', user.uid, 'assets', asset.id), { 
-                                    currentPrice: priceFound, 
+                                    currentPrice: result.regularMarketPrice, 
                                     updatedAt: Date.now() 
                                 });
                             }
                         }
                     }
                 } catch (e) { 
-                    console.error("Erro na sincronização:", e); 
+                    console.error("Erro na sincronização BrAPI:", e); 
                 } finally { 
                     setIsSyncing(false); 
                 }
@@ -249,7 +226,7 @@
 
             useEffect(() => {
                 if (activeTab !== 'home' && user && assets.length > 0) {
-                    const timer = setTimeout(() => syncPrices(activeTab), 1500);
+                    const timer = setTimeout(() => syncPrices(activeTab), 1000);
                     return () => clearTimeout(timer);
                 }
             }, [activeTab, user]);
@@ -298,14 +275,21 @@
                 setShowSuggestions(false);
             };
 
+            // Lógica de Processamento e Soma
             const processedAssets = useMemo(() => assets.map(a => {
-                const totalInvested = a.qty * (a.avgPrice || 0);
-                // Se o preço atual for zero, usamos o preço médio como estimativa inicial de valor para a soma
-                const priceForTotal = (a.currentPrice && a.currentPrice > 0) ? a.currentPrice : (a.avgPrice || 0);
-                const totalCurrent = a.qty * priceForTotal;
-                const profitVal = (a.currentPrice > 0) ? (totalCurrent - totalInvested) : 0;
+                const qty = parseFloat(a.qty) || 0;
+                const avgPrice = parseFloat(a.avgPrice) || 0;
+                const currentPrice = parseFloat(a.currentPrice) || 0;
+
+                const totalInvested = qty * avgPrice;
+                // Se o preço atual for zero (ainda não sincronizado), usamos o preço médio como base para não zerar o património
+                const priceForCurrent = (currentPrice > 0) ? currentPrice : avgPrice;
+                const totalCurrent = qty * priceForCurrent;
                 
-                return { ...a, totalInvested, totalCurrent, profitVal, profitPerc: (totalInvested > 0 && a.currentPrice > 0) ? (profitVal / totalInvested) * 100 : 0 };
+                const profitVal = (currentPrice > 0) ? (totalCurrent - totalInvested) : 0;
+                const profitPerc = (totalInvested > 0 && currentPrice > 0) ? (profitVal / totalInvested) * 100 : 0;
+                
+                return { ...a, qty, avgPrice, currentPrice, totalInvested, totalCurrent, profitVal, profitPerc };
             }), [assets]);
 
             const totals = useMemo(() => {
@@ -330,7 +314,7 @@
             const shareGoal = totalGoal / 4;
             const formatBRL = (v) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
 
-            if (!user) return <div className="h-screen bg-black flex flex-col items-center justify-center gap-4 text-white"><Icons.Loader2 size={40} className="text-cyan-500" /><p className="text-[10px] font-black tracking-widest uppercase">A ligar ao sistema...</p></div>;
+            if (!user) return <div className="h-screen bg-black flex flex-col items-center justify-center gap-4 text-white"><Icons.Loader2 size={40} className="text-cyan-500" /><p className="text-[10px] font-black tracking-widest uppercase">A carregar sistema Tribo...</p></div>;
 
             return (
                 <div className="min-h-screen bg-[#050505] text-zinc-100 pb-32 selection:bg-cyan-500/20">
@@ -341,7 +325,7 @@
                                 <h1 className="font-black tracking-tighter text-xl uppercase text-white">R.I <span className="text-cyan-500 text-white">SISTEMA</span></h1>
                             </div>
                             <div className="flex items-center gap-3">
-                                {isSyncing && <div className="text-[10px] font-bold text-cyan-400 animate-pulse-cyan uppercase tracking-widest">Sincronizando Mercado...</div>}
+                                {isSyncing && <div className="text-[10px] font-bold text-cyan-400 animate-pulse-cyan uppercase tracking-widest">Sincronizando BrAPI...</div>}
                                 <Icons.Cloud size={20} className={isSyncing ? "text-cyan-500 animate-pulse" : "text-emerald-500/50"} />
                             </div>
                         </div>
@@ -454,7 +438,7 @@
                                                 <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1 text-white">Preço Médio</span><span className="text-sm font-bold text-zinc-300">{formatBRL(asset.avgPrice)}</span></div>
                                                 <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1 text-white">Valor Atual</span><span className="text-sm font-bold text-cyan-400">{(asset.currentPrice > 0) ? formatBRL(asset.currentPrice) : 'Aguardando Sinc...'}</span></div>
                                                 <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1 text-white">Total Investido</span><span className="text-sm font-bold text-zinc-400">{formatBRL(asset.totalInvested)}</span></div>
-                                                <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1 text-white">Valor em Carteira</span><span className="text-sm font-black text-white">{formatBRL(asset.totalCurrent)}</span></div>
+                                                <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1 text-white">Total Atual</span><span className="text-sm font-black text-white">{formatBRL(asset.totalCurrent)}</span></div>
                                                 <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1 text-white">Lucro R$</span><span className={`text-sm font-black flex items-center gap-1 ${asset.profitVal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{asset.profitVal >= 0 ? <Icons.ArrowUpRight size={14} /> : <Icons.ArrowDownRight size={14} />}{formatBRL(asset.profitVal)}</span></div>
                                                 <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1 text-white">Lucro %</span><span className={`text-sm font-black ${asset.profitPerc >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{asset.profitPerc >= 0 ? '+' : ''}{asset.profitPerc.toFixed(2)}%</span></div>
                                             </div>
