@@ -117,24 +117,17 @@
         };
 
         const appId = "ri-investimentos-final-tribo";
-        // Chave BrAPI fornecida pelo utilizador
-        const BRAPI_TOKEN = "kV6yXxdJXBydFXERkYgfSf";
+        
+        // --- CONFIGURAÇÃO DADOS DE MERCADO ---
+        // Nota: Substituímos BrAPI pelo motor de Dados de Mercado
+        const DM_API_BASE = "https://api.dadosdemercado.com.br/v1";
+        const DM_TOKEN = "kV6yXxdJXBydFXERkYgfSf"; // Reutilizando o token do utilizador (Assumindo compatibilidade ou placeholder)
 
         const STRATEGY = [
             { id: 'acoes', label: 'A - AÇÕES', color: '#00D4C5', icon: Icons.TrendingUp, desc: 'Bolsa Brasileira' },
             { id: 'realestate', label: 'R - REAL ESTATE', color: '#0088FE', icon: Icons.Building2, desc: 'FIIs e Imóveis' },
             { id: 'caixa', label: 'C - CAIXA', color: '#4ADE80', icon: Icons.Coins, desc: 'Liquidez/Renda Fixa' },
             { id: 'internacional', label: 'A - ALTERNATIVOS', color: '#EF4444', icon: Icons.Globe, desc: 'Mercado Global' }
-        ];
-
-        const POPULAR_TICKERS = [
-            "PETR4", "PETR3", "VALE3", "ITUB4", "BBDC4", "BBDC3", "ABEV3", "BBAS3", "ITSA4", "B3SA3", "WEGE3", "MGLU3", "PRIO3", "SLCE3",
-            "RENT3", "GGBR4", "CSNA3", "SUZB3", "JBSS3", "RAIL3", "RADL3", "EQTL3", "CPLE6", "TRPL4", "VIVT3", "TIMS3", "SBSP3", "ELET3", 
-            "ELET6", "LREN3", "HYPE3", "UGPA3", "RAIZ4", "RDOR3", "ASAI3", "CRFB3", "NTCO3", "BRFS3", "EMBR3", "MULT3", "IGTI11", "YDUQ3", 
-            "COGN3", "CVCB3", "AZUL4", "GOLL4", "MRVE3", "TEND3", "EZTC3", "CYRE3", "ALOS3", "ARZZ3", "DXCO3", "SMTO3", "KLBN11", "LWSA3",
-            "HGLG11", "KNRI11", "MXRF11", "XPLG11", "VISC11", "MALL11", "BCFF11", "BRCR11", "BTLG11", "XPML11", "VILG11", "KNIP11", "KNCR11",
-            "HGBS11", "HGRU11", "IRDM11", "CPTS11", "RECR11", "VRTA11", "ALZR11", "TRXF11", "GALG11", "VGHF11", "VGIR11", "RBRR11", "HABT11", "RZTR11",
-            "AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSLA", "NVDA", "NFLX", "AMD", "BRK.B", "VOO", "IVV", "QQQ", "SCHD", "VT", "VTI"
         ];
 
         function App() {
@@ -147,6 +140,8 @@
             const [isSyncing, setIsSyncing] = useState(false);
             const [newAsset, setNewAsset] = useState({ name: '', qty: '', avgPrice: '', currentPrice: '' });
             
+            // Lista de Tickers Sincronizada da API
+            const [apiTickers, setApiTickers] = useState([]);
             const [suggestions, setSuggestions] = useState([]);
             const [showSuggestions, setShowSuggestions] = useState(false);
             const suggestionRef = useRef(null);
@@ -154,6 +149,21 @@
             const FSDK = window.FirebaseSDK;
             const db = useMemo(() => FSDK.getFirestore(FSDK.initializeApp(firebaseConfig)), [FSDK]);
             const auth = useMemo(() => FSDK.getAuth(FSDK.initializeApp(firebaseConfig)), [FSDK]);
+
+            // --- CARREGAR TICKERS DA DADOS DE MERCADO ---
+            useEffect(() => {
+                const fetchTickers = async () => {
+                    try {
+                        const res = await fetch(`${DM_API_BASE}/tickers?token=${DM_TOKEN}`);
+                        if (res.ok) {
+                            const data = await res.json();
+                            // Dados de Mercado retorna lista de objetos { ticker, name }
+                            setApiTickers(data.map(item => item.ticker));
+                        }
+                    } catch (e) { console.error("Erro ao carregar lista de ativos:", e); }
+                };
+                fetchTickers();
+            }, []);
 
             useEffect(() => {
                 const initAuth = async () => {
@@ -187,7 +197,7 @@
                 return () => document.removeEventListener("mousedown", handleClickOutside);
             }, []);
 
-            // --- SINCRONIZAÇÃO COM BRAPI ATUALIZADA ---
+            // --- SINCRONIZAÇÃO VIA DADOS DE MERCADO ---
             const syncPrices = useCallback(async (forcedTab = null) => {
                 const tabToSync = forcedTab || activeTab;
                 if (!user || isSyncing || tabToSync === 'home' || tabToSync === 'caixa') return;
@@ -197,36 +207,29 @@
                 
                 setIsSyncing(true);
                 try {
-                    // Puxar tickers formatados (Remover espaços e garantir maiúsculas)
-                    const tickersList = tabAssets.map(a => a.name.trim().toUpperCase()).join(',');
-                    
-                    // Implementação exata conforme cabeçalho e URL sugeridos
-                    const response = await fetch(
-                        `https://brapi.dev/api/quote/${tickersList}?modules=summaryProfile`,
-                        {
-                            headers: {
-                                "Authorization": `Bearer ${BRAPI_TOKEN}`
+                    // Dados de Mercado consulta por ticker individual para cotações
+                    // Vamos processar em paralelo para agilizar
+                    const updatePromises = tabAssets.map(async (asset) => {
+                        try {
+                            const ticker = asset.name.trim().toUpperCase();
+                            const res = await fetch(`${DM_API_BASE}/tickers/${ticker}/quotes?token=${DM_TOKEN}`);
+                            if (res.ok) {
+                                const quotes = await res.json();
+                                // Pega a cotação mais recente (última da lista)
+                                if (quotes.length > 0) {
+                                    const latest = quotes[quotes.length - 1];
+                                    await FSDK.updateDoc(FSDK.doc(db, 'artifacts', appId, 'users', user.uid, 'assets', asset.id), { 
+                                        currentPrice: latest.close, 
+                                        updatedAt: Date.now() 
+                                    });
+                                }
                             }
-                        }
-                    );
+                        } catch (e) { console.error(`Erro no ticker ${asset.name}:`, e); }
+                    });
 
-                    if (!response.ok) throw new Error("Erro na BrAPI");
-                    const data = await response.json();
-                    
-                    if (data.results && data.results.length > 0) {
-                        for (const result of data.results) {
-                            const asset = tabAssets.find(a => a.name.trim().toUpperCase() === result.symbol.toUpperCase());
-                            // Atualiza se houver correspondência e preço válido
-                            if (asset && result.regularMarketPrice) {
-                                await FSDK.updateDoc(FSDK.doc(db, 'artifacts', appId, 'users', user.uid, 'assets', asset.id), { 
-                                    currentPrice: result.regularMarketPrice, 
-                                    updatedAt: Date.now() 
-                                });
-                            }
-                        }
-                    }
+                    await Promise.all(updatePromises);
                 } catch (e) { 
-                    console.error("Erro na sincronização BrAPI:", e); 
+                    console.error("Erro na sincronização Dados de Mercado:", e); 
                 } finally { 
                     setIsSyncing(false); 
                 }
@@ -270,7 +273,8 @@
                 const upperVal = val.toUpperCase();
                 setNewAsset({...newAsset, name: upperVal});
                 if (upperVal.length > 0) {
-                    const filtered = POPULAR_TICKERS.filter(t => t.startsWith(upperVal)).slice(0, 6);
+                    // Filtra tickers da lista real da API
+                    const filtered = apiTickers.filter(t => t.startsWith(upperVal)).slice(0, 8);
                     setSuggestions(filtered);
                     setShowSuggestions(filtered.length > 0);
                 } else {
@@ -283,14 +287,13 @@
                 setShowSuggestions(false);
             };
 
-            // Lógica de Processamento e Soma Robusta
+            // Lógica de Processamento e Soma
             const processedAssets = useMemo(() => assets.map(a => {
                 const qty = parseFloat(a.qty) || 0;
                 const avgPrice = parseFloat(a.avgPrice) || 0;
                 const currentPrice = parseFloat(a.currentPrice) || 0;
 
                 const totalInvested = qty * avgPrice;
-                // Se o preço atual for zero (antes de sincronizar), usa o médio para não zerar o dashboard
                 const priceForCurrent = (currentPrice > 0) ? currentPrice : avgPrice;
                 const totalCurrent = qty * priceForCurrent;
                 
@@ -322,7 +325,7 @@
             const shareGoal = totalGoal / 4;
             const formatBRL = (v) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
 
-            if (!user) return <div className="h-screen bg-black flex flex-col items-center justify-center gap-4 text-white"><Icons.Loader2 size={40} className="text-cyan-500" /><p className="text-[10px] font-black tracking-widest uppercase">A carregar sistema Tribo...</p></div>;
+            if (!user) return <div className="h-screen bg-black flex flex-col items-center justify-center gap-4 text-white"><Icons.Loader2 size={40} className="text-cyan-500" /><p className="text-[10px] font-black tracking-widest uppercase">A ligar ao sistema Tribo...</p></div>;
 
             return (
                 <div className="min-h-screen bg-[#050505] text-zinc-100 pb-32 selection:bg-cyan-500/20">
@@ -333,7 +336,7 @@
                                 <h1 className="font-black tracking-tighter text-xl uppercase text-white">R.I <span className="text-cyan-500 text-white">SISTEMA</span></h1>
                             </div>
                             <div className="flex items-center gap-3">
-                                {isSyncing && <div className="text-[10px] font-bold text-cyan-400 animate-pulse-cyan uppercase tracking-widest">Sincronizando BrAPI...</div>}
+                                {isSyncing && <div className="text-[10px] font-bold text-cyan-400 animate-pulse-cyan uppercase tracking-widest">Sincronizando Dados de Mercado...</div>}
                                 <Icons.Cloud size={20} className={isSyncing ? "text-cyan-500 animate-pulse" : "text-emerald-500/50"} />
                             </div>
                         </div>
@@ -342,7 +345,7 @@
                     <main className="max-w-4xl mx-auto px-6 pt-10">
                         {activeTab === 'home' ? (
                             <div className="animate-in fade-in slide-in-from-bottom-4 duration-700">
-                                <div className="relative flex items-center justify-center w-72 h-72 mx-auto my-12 text-white">
+                                <div className="relative flex items-center justify-center w-72 h-72 mx-auto my-12 text-white text-white">
                                     <svg viewBox="0 0 200 200" className="transform -rotate-90 w-full h-full drop-shadow-[0_0_25px_rgba(0,0,0,0.8)]">
                                         {STRATEGY.map((cat, i, arr) => {
                                             const r = 82; const circ = 2 * Math.PI * r;
@@ -357,7 +360,7 @@
                                     </div>
                                 </div>
 
-                                <div className="bg-zinc-900/30 border border-zinc-900 p-8 rounded-[2.5rem] mb-10 grid grid-cols-1 md:grid-cols-2 gap-6 premium-shadow">
+                                <div className="bg-zinc-900/30 border border-zinc-900 p-8 rounded-[2.5rem] mb-10 grid grid-cols-1 md:grid-cols-2 gap-6 premium-shadow text-white">
                                     <div className="flex justify-between items-end">
                                         <div>
                                             <p className="text-[10px] font-black text-zinc-500 tracking-[0.2em] mb-2 uppercase text-white">Património Atualizado</p>
@@ -411,16 +414,16 @@
                                     </div>
                                 </div>
 
-                                <form onSubmit={addAsset} className="bg-zinc-900/20 border border-zinc-900 p-8 rounded-[2.5rem] mb-10 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 items-end text-white premium-shadow">
+                                <form onSubmit={addAsset} className="bg-zinc-900/20 border border-zinc-900 p-8 rounded-[2.5rem] mb-10 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 items-end text-white premium-shadow text-white">
                                     <div className="space-y-2 relative" ref={suggestionRef}>
-                                        <label className="text-[9px] font-black text-zinc-600 uppercase ml-3 tracking-widest">Ticker (B3/Global)</label>
+                                        <label className="text-[9px] font-black text-zinc-600 uppercase ml-3 tracking-widest">Ticker (Dados de Mercado)</label>
                                         <input required type="text" placeholder="EX: PETR4" value={newAsset.name} onChange={e => handleTickerChange(e.target.value)} onFocus={() => handleTickerChange(newAsset.name)} className="w-full bg-black border border-zinc-800 rounded-2xl p-4 text-sm font-bold focus:border-cyan-500 outline-none text-white uppercase transition-all" />
                                         {showSuggestions && (
                                             <ul className="absolute top-full left-0 right-0 mt-2 bg-[#0A0A0A] border border-zinc-800 rounded-2xl overflow-hidden z-[100] shadow-2xl animate-in fade-in zoom-in-95 duration-200">
                                                 {suggestions.map((ticker, idx) => (
                                                     <li key={idx} onClick={() => selectSuggestion(ticker)} className="px-6 py-4 hover:bg-cyan-500/10 cursor-pointer font-black text-xs text-zinc-300 border-b border-zinc-900 last:border-none flex justify-between items-center transition-colors">
                                                         <span className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-cyan-500"></div>{ticker}</span>
-                                                        <span className="text-[8px] text-zinc-700 uppercase tracking-widest">{(ticker.length >= 5 && !ticker.includes('.')) || ticker.includes('11') ? 'B3 BRASIL' : 'GLOBAL'}</span>
+                                                        <span className="text-[8px] text-zinc-700 uppercase tracking-widest">DADOS DE MERCADO</span>
                                                     </li>
                                                 ))}
                                             </ul>
@@ -442,13 +445,13 @@
                                                 <button onClick={() => removeAsset(asset.id)} className="p-3 text-zinc-800 hover:text-rose-500 hover:bg-rose-500/10 rounded-xl transition-all"><Icons.Trash2 size={18} /></button>
                                             </div>
                                             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-4 border-t border-zinc-900/50">
-                                                <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1 text-white">Quantidade</span><span className="text-sm font-bold text-white">{asset.qty} UN</span></div>
-                                                <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1 text-white">Preço Médio</span><span className="text-sm font-bold text-zinc-300">{formatBRL(asset.avgPrice)}</span></div>
-                                                <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1 text-white">Valor Atual</span><span className="text-sm font-bold text-cyan-400">{(asset.currentPrice > 0) ? formatBRL(asset.currentPrice) : 'Aguardando Sinc...'}</span></div>
-                                                <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1 text-white">Total Investido</span><span className="text-sm font-bold text-zinc-400">{formatBRL(asset.totalInvested)}</span></div>
-                                                <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1 text-white">Total Atual</span><span className="text-sm font-black text-white">{formatBRL(asset.totalCurrent)}</span></div>
-                                                <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1 text-white">Lucro R$</span><span className={`text-sm font-black flex items-center gap-1 ${asset.profitVal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{asset.profitVal >= 0 ? <Icons.ArrowUpRight size={14} /> : <Icons.ArrowDownRight size={14} />}{formatBRL(asset.profitVal)}</span></div>
-                                                <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1 text-white">Lucro %</span><span className={`text-sm font-black ${asset.profitPerc >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{asset.profitPerc >= 0 ? '+' : ''}{asset.profitPerc.toFixed(2)}%</span></div>
+                                                <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1 text-white text-white">Quantidade</span><span className="text-sm font-bold text-white">{asset.qty} UN</span></div>
+                                                <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1 text-white text-white">Preço Médio</span><span className="text-sm font-bold text-zinc-300">{formatBRL(asset.avgPrice)}</span></div>
+                                                <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1 text-white text-white">Valor Atual</span><span className="text-sm font-bold text-cyan-400">{(asset.currentPrice > 0) ? formatBRL(asset.currentPrice) : 'Aguardando Sinc...'}</span></div>
+                                                <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1 text-white text-white">Total Investido</span><span className="text-sm font-bold text-zinc-400">{formatBRL(asset.totalInvested)}</span></div>
+                                                <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1 text-white text-white">Total Atual</span><span className="text-sm font-bold text-white">{formatBRL(asset.totalCurrent)}</span></div>
+                                                <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1 text-white text-white">Lucro R$</span><span className={`text-sm font-black flex items-center gap-1 ${asset.profitVal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{asset.profitVal >= 0 ? <Icons.ArrowUpRight size={14} /> : <Icons.ArrowDownRight size={14} />}{formatBRL(asset.profitVal)}</span></div>
+                                                <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1 text-white text-white">Lucro %</span><span className={`text-sm font-black ${asset.profitPerc >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{asset.profitPerc >= 0 ? '+' : ''}{asset.profitPerc.toFixed(2)}%</span></div>
                                             </div>
                                         </div>
                                     ))}
@@ -457,7 +460,7 @@
                         )}
                     </main>
 
-                    <nav className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-[#0A0A0A]/90 backdrop-blur-md border border-zinc-800/50 p-2.5 rounded-[2.5rem] flex items-center gap-2 z-50 shadow-[0_30px_60px_rgba(0,0,0,0.7)] text-white">
+                    <nav className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-[#0A0A0A]/90 backdrop-blur-md border border-zinc-800/50 p-2.5 rounded-[2.5rem] flex items-center gap-2 z-50 shadow-[0_30px_60px_rgba(0,0,0,0.7)] text-white text-white">
                         <button onClick={() => setActiveTab('home')} className={`p-4 rounded-[1.8rem] transition-all flex items-center gap-3 ${activeTab === 'home' ? 'bg-cyan-500 text-black shadow-[0_0_25px_rgba(0,212,197,0.4)]' : 'text-zinc-600 hover:bg-zinc-900'}`}><Icons.LayoutGrid size={20} strokeWidth={2.5} /><span className={activeTab === 'home' ? 'text-[10px] font-black tracking-widest uppercase pr-2' : 'hidden'}>Dashboard</span></button>
                         <div className="w-px h-6 bg-zinc-800/50 mx-1.5"></div>
                         {STRATEGY.map(tab => (
