@@ -56,6 +56,19 @@
         .animate-pulse-cyan {
             animation: pulse-cyan 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
         }
+        
+        /* Estilo para a lista de sugestões */
+        .suggestion-list {
+            max-height: 250px;
+            overflow-y: auto;
+        }
+        .suggestion-list::-webkit-scrollbar {
+            width: 4px;
+        }
+        .suggestion-list::-webkit-scrollbar-thumb {
+            background: #27272a;
+            border-radius: 10px;
+        }
     </style>
 </head>
 <body>
@@ -103,6 +116,9 @@
             ),
             Cloud: (props) => (
                 <svg width={props.size || 24} height={props.size || 24} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={props.className}><path d="M17.5 19c2.5 0 4.5-2 4.5-4.5 0-2.4-1.8-4.3-4.2-4.5C17.4 6.7 14.6 4 11 4 8.2 4 5.9 5.8 5.1 8.3 2.7 8.9 1 11.1 1 13.5 1 16.5 3.5 19 6.5 19Z"></path></svg>
+            ),
+            Search: (props) => (
+                <svg width={props.size || 20} height={props.size || 20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={props.className}><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
             )
         };
 
@@ -119,15 +135,21 @@
         const appId = "ri-investimentos-final-tribo";
         
         // --- CONFIGURAÇÃO DADOS DE MERCADO ---
-        // Nota: Substituímos BrAPI pelo motor de Dados de Mercado
         const DM_API_BASE = "https://api.dadosdemercado.com.br/v1";
-        const DM_TOKEN = "kV6yXxdJXBydFXERkYgfSf"; // Reutilizando o token do utilizador (Assumindo compatibilidade ou placeholder)
+        const DM_TOKEN = "kV6yXxdJXBydFXERkYgfSf"; 
 
         const STRATEGY = [
             { id: 'acoes', label: 'A - AÇÕES', color: '#00D4C5', icon: Icons.TrendingUp, desc: 'Bolsa Brasileira' },
             { id: 'realestate', label: 'R - REAL ESTATE', color: '#0088FE', icon: Icons.Building2, desc: 'FIIs e Imóveis' },
             { id: 'caixa', label: 'C - CAIXA', color: '#4ADE80', icon: Icons.Coins, desc: 'Liquidez/Renda Fixa' },
             { id: 'internacional', label: 'A - ALTERNATIVOS', color: '#EF4444', icon: Icons.Globe, desc: 'Mercado Global' }
+        ];
+
+        // Tickers populares como Fallback imediato
+        const FALLBACK_TICKERS = [
+            "PETR4", "VALE3", "ITUB4", "BBDC4", "BBAS3", "ABEV3", "ITSA4", "B3SA3", "WEGE3", "MGLU3", "RENT3", "PRIO3",
+            "HGLG11", "MXRF11", "KNRI11", "XPML11", "VISC11", "XPLG11", "HGRU11", "BCFF11", "VILG11", "IRDM11",
+            "AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSLA", "NVDA", "NFLX", "IVV", "VOO", "QQQ"
         ];
 
         function App() {
@@ -141,7 +163,7 @@
             const [newAsset, setNewAsset] = useState({ name: '', qty: '', avgPrice: '', currentPrice: '' });
             
             // Lista de Tickers Sincronizada da API
-            const [apiTickers, setApiTickers] = useState([]);
+            const [apiTickers, setApiTickers] = useState(FALLBACK_TICKERS);
             const [suggestions, setSuggestions] = useState([]);
             const [showSuggestions, setShowSuggestions] = useState(false);
             const suggestionRef = useRef(null);
@@ -157,10 +179,13 @@
                         const res = await fetch(`${DM_API_BASE}/tickers?token=${DM_TOKEN}`);
                         if (res.ok) {
                             const data = await res.json();
-                            // Dados de Mercado retorna lista de objetos { ticker, name }
-                            setApiTickers(data.map(item => item.ticker));
+                            // Mescla tickers da API com os populares, removendo duplicados
+                            const tickers = [...new Set([...FALLBACK_TICKERS, ...data.map(item => item.ticker)])];
+                            setApiTickers(tickers);
                         }
-                    } catch (e) { console.error("Erro ao carregar lista de ativos:", e); }
+                    } catch (e) { 
+                        console.error("Erro ao carregar lista de ativos:", e); 
+                    }
                 };
                 fetchTickers();
             }, []);
@@ -207,15 +232,12 @@
                 
                 setIsSyncing(true);
                 try {
-                    // Dados de Mercado consulta por ticker individual para cotações
-                    // Vamos processar em paralelo para agilizar
                     const updatePromises = tabAssets.map(async (asset) => {
                         try {
                             const ticker = asset.name.trim().toUpperCase();
                             const res = await fetch(`${DM_API_BASE}/tickers/${ticker}/quotes?token=${DM_TOKEN}`);
                             if (res.ok) {
                                 const quotes = await res.json();
-                                // Pega a cotação mais recente (última da lista)
                                 if (quotes.length > 0) {
                                     const latest = quotes[quotes.length - 1];
                                     await FSDK.updateDoc(FSDK.doc(db, 'artifacts', appId, 'users', user.uid, 'assets', asset.id), { 
@@ -269,12 +291,22 @@
                 if (user) await FSDK.deleteDoc(FSDK.doc(db, 'artifacts', appId, 'users', user.uid, 'assets', id));
             };
 
+            // Lógica de Autocomplete
             const handleTickerChange = (val) => {
                 const upperVal = val.toUpperCase();
                 setNewAsset({...newAsset, name: upperVal});
                 if (upperVal.length > 0) {
-                    // Filtra tickers da lista real da API
-                    const filtered = apiTickers.filter(t => t.startsWith(upperVal)).slice(0, 8);
+                    // Filtra ativos que contenham ou comecem com o texto digitado
+                    const filtered = apiTickers
+                        .filter(t => t.includes(upperVal))
+                        .sort((a, b) => {
+                            // Prioriza os que começam exatamente com a letra
+                            if (a.startsWith(upperVal) && !b.startsWith(upperVal)) return -1;
+                            if (!a.startsWith(upperVal) && b.startsWith(upperVal)) return 1;
+                            return a.localeCompare(b);
+                        })
+                        .slice(0, 10);
+                    
                     setSuggestions(filtered);
                     setShowSuggestions(filtered.length > 0);
                 } else {
@@ -345,7 +377,7 @@
                     <main className="max-w-4xl mx-auto px-6 pt-10">
                         {activeTab === 'home' ? (
                             <div className="animate-in fade-in slide-in-from-bottom-4 duration-700">
-                                <div className="relative flex items-center justify-center w-72 h-72 mx-auto my-12 text-white text-white">
+                                <div className="relative flex items-center justify-center w-72 h-72 mx-auto my-12 text-white">
                                     <svg viewBox="0 0 200 200" className="transform -rotate-90 w-full h-full drop-shadow-[0_0_25px_rgba(0,0,0,0.8)]">
                                         {STRATEGY.map((cat, i, arr) => {
                                             const r = 82; const circ = 2 * Math.PI * r;
@@ -414,19 +446,44 @@
                                     </div>
                                 </div>
 
-                                <form onSubmit={addAsset} className="bg-zinc-900/20 border border-zinc-900 p-8 rounded-[2.5rem] mb-10 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 items-end text-white premium-shadow text-white">
+                                <form onSubmit={addAsset} className="bg-zinc-900/20 border border-zinc-900 p-8 rounded-[2.5rem] mb-10 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 items-end text-white premium-shadow text-white relative">
                                     <div className="space-y-2 relative" ref={suggestionRef}>
                                         <label className="text-[9px] font-black text-zinc-600 uppercase ml-3 tracking-widest">Ticker (Dados de Mercado)</label>
-                                        <input required type="text" placeholder="EX: PETR4" value={newAsset.name} onChange={e => handleTickerChange(e.target.value)} onFocus={() => handleTickerChange(newAsset.name)} className="w-full bg-black border border-zinc-800 rounded-2xl p-4 text-sm font-bold focus:border-cyan-500 outline-none text-white uppercase transition-all" />
+                                        <div className="relative">
+                                            <input 
+                                                required 
+                                                type="text" 
+                                                placeholder="EX: PETR4" 
+                                                autoComplete="off"
+                                                value={newAsset.name} 
+                                                onChange={e => handleTickerChange(e.target.value)} 
+                                                onFocus={() => handleTickerChange(newAsset.name)} 
+                                                className="w-full bg-black border border-zinc-800 rounded-2xl p-4 pl-12 text-sm font-bold focus:border-cyan-500 outline-none text-white uppercase transition-all" 
+                                            />
+                                            <div className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-600">
+                                                <Icons.Search size={18} />
+                                            </div>
+                                        </div>
+                                        
+                                        {/* Lista de Sugestões / Autocomplete */}
                                         {showSuggestions && (
-                                            <ul className="absolute top-full left-0 right-0 mt-2 bg-[#0A0A0A] border border-zinc-800 rounded-2xl overflow-hidden z-[100] shadow-2xl animate-in fade-in zoom-in-95 duration-200">
-                                                {suggestions.map((ticker, idx) => (
-                                                    <li key={idx} onClick={() => selectSuggestion(ticker)} className="px-6 py-4 hover:bg-cyan-500/10 cursor-pointer font-black text-xs text-zinc-300 border-b border-zinc-900 last:border-none flex justify-between items-center transition-colors">
-                                                        <span className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-cyan-500"></div>{ticker}</span>
-                                                        <span className="text-[8px] text-zinc-700 uppercase tracking-widest">DADOS DE MERCADO</span>
-                                                    </li>
-                                                ))}
-                                            </ul>
+                                            <div className="absolute top-full left-0 right-0 mt-2 bg-[#0A0A0A] border border-zinc-800 rounded-2xl overflow-hidden z-[100] shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+                                                <ul className="suggestion-list">
+                                                    {suggestions.map((ticker, idx) => (
+                                                        <li 
+                                                            key={idx} 
+                                                            onClick={() => selectSuggestion(ticker)} 
+                                                            className="px-6 py-4 hover:bg-cyan-500/10 cursor-pointer font-black text-xs text-zinc-300 border-b border-zinc-900 last:border-none flex justify-between items-center transition-colors group"
+                                                        >
+                                                            <span className="flex items-center gap-3">
+                                                                <div className="w-1.5 h-1.5 rounded-full bg-cyan-500 group-hover:scale-150 transition-transform"></div>
+                                                                {ticker}
+                                                            </span>
+                                                            <span className="text-[8px] text-zinc-700 uppercase tracking-widest bg-zinc-900/50 px-2 py-1 rounded">B3/MERCADO</span>
+                                                        </li>
+                                                    ))}
+                                                </ul>
+                                            </div>
                                         )}
                                     </div>
                                     <div className="space-y-2"><label className="text-[9px] font-black text-zinc-600 uppercase ml-3 tracking-widest">Quantidade</label><input required type="number" step="any" value={newAsset.qty} onChange={e => setNewAsset({...newAsset, qty: e.target.value})} className="w-full bg-black border border-zinc-800 rounded-2xl p-4 text-sm font-bold outline-none text-white" /></div>
@@ -445,13 +502,13 @@
                                                 <button onClick={() => removeAsset(asset.id)} className="p-3 text-zinc-800 hover:text-rose-500 hover:bg-rose-500/10 rounded-xl transition-all"><Icons.Trash2 size={18} /></button>
                                             </div>
                                             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-4 border-t border-zinc-900/50">
-                                                <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1 text-white text-white">Quantidade</span><span className="text-sm font-bold text-white">{asset.qty} UN</span></div>
-                                                <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1 text-white text-white">Preço Médio</span><span className="text-sm font-bold text-zinc-300">{formatBRL(asset.avgPrice)}</span></div>
-                                                <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1 text-white text-white">Valor Atual</span><span className="text-sm font-bold text-cyan-400">{(asset.currentPrice > 0) ? formatBRL(asset.currentPrice) : 'Aguardando Sinc...'}</span></div>
-                                                <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1 text-white text-white">Total Investido</span><span className="text-sm font-bold text-zinc-400">{formatBRL(asset.totalInvested)}</span></div>
-                                                <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1 text-white text-white">Total Atual</span><span className="text-sm font-bold text-white">{formatBRL(asset.totalCurrent)}</span></div>
-                                                <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1 text-white text-white">Lucro R$</span><span className={`text-sm font-black flex items-center gap-1 ${asset.profitVal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{asset.profitVal >= 0 ? <Icons.ArrowUpRight size={14} /> : <Icons.ArrowDownRight size={14} />}{formatBRL(asset.profitVal)}</span></div>
-                                                <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1 text-white text-white">Lucro %</span><span className={`text-sm font-black ${asset.profitPerc >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{asset.profitPerc >= 0 ? '+' : ''}{asset.profitPerc.toFixed(2)}%</span></div>
+                                                <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1 text-white">Quantidade</span><span className="text-sm font-bold text-white">{asset.qty} UN</span></div>
+                                                <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1 text-white">Preço Médio</span><span className="text-sm font-bold text-zinc-300">{formatBRL(asset.avgPrice)}</span></div>
+                                                <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1 text-white">Valor Atual</span><span className="text-sm font-bold text-cyan-400">{(asset.currentPrice > 0) ? formatBRL(asset.currentPrice) : 'Aguardando Sinc...'}</span></div>
+                                                <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1 text-white">Total Investido</span><span className="text-sm font-bold text-zinc-400">{formatBRL(asset.totalInvested)}</span></div>
+                                                <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1 text-white">Total Atual</span><span className="text-sm font-bold text-white">{formatBRL(asset.totalCurrent)}</span></div>
+                                                <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1 text-white">Lucro R$</span><span className={`text-sm font-black flex items-center gap-1 ${asset.profitVal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{asset.profitVal >= 0 ? <Icons.ArrowUpRight size={14} /> : <Icons.ArrowDownRight size={14} />}{formatBRL(asset.profitVal)}</span></div>
+                                                <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1 text-white">Lucro %</span><span className={`text-sm font-black ${asset.profitPerc >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{asset.profitPerc >= 0 ? '+' : ''}{asset.profitPerc.toFixed(2)}%</span></div>
                                             </div>
                                         </div>
                                     ))}
