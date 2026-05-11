@@ -185,7 +185,11 @@
                 
                 setIsSyncing(true);
                 try {
-                    const prompt = `Preço atual em BRL para: ${tabAssets.map(a => a.name).join(', ')}. Responda APENAS JSON: {"TICKER": valor}.`;
+                    // Prompt mais preciso para garantir retorno de ativos da B3
+                    const prompt = `Atue como um terminal financeiro. Retorne o preço ATUAL em Reais (BRL) para estes tickers: ${tabAssets.map(a => a.name).join(', ')}. 
+                    Se forem ações ou FIIs brasileiros (ex: PRIO3, SLCE3, HGLG11), use os dados da B3. 
+                    Responda APENAS um objeto JSON puro: {"TICKER": valor_numerico}. Exemplo: {"PETR4": 36.50}`;
+
                     const res = await fetch(`${GEMINI_URL}?key=${apiKey}`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -195,21 +199,29 @@
                             generationConfig: { responseMimeType: "application/json" } 
                         })
                     });
+                    
                     const data = await res.json();
                     const textContent = data.candidates?.[0]?.content?.parts?.[0]?.text;
+                    
                     if (textContent) {
-                        const prices = JSON.parse(textContent.replace(/```json|```/g, "").trim());
-                        for (const asset of tabAssets) {
-                            if (prices[asset.name]) {
-                                await FSDK.updateDoc(FSDK.doc(db, 'artifacts', appId, 'users', user.uid, 'assets', asset.id), { 
-                                    currentPrice: prices[asset.name], 
-                                    updatedAt: Date.now() 
-                                });
+                        // Extração segura de JSON caso a IA inclua blocos de código
+                        const jsonMatch = textContent.match(/\{.*\}/s);
+                        if (jsonMatch) {
+                            const prices = JSON.parse(jsonMatch[0]);
+                            for (const asset of tabAssets) {
+                                // Tenta encontrar o preço pelo nome exato ou normalizado (uppercase)
+                                const price = prices[asset.name] || prices[asset.name.toUpperCase()];
+                                if (price && typeof price === 'number') {
+                                    await FSDK.updateDoc(FSDK.doc(db, 'artifacts', appId, 'users', user.uid, 'assets', asset.id), { 
+                                        currentPrice: price, 
+                                        updatedAt: Date.now() 
+                                    });
+                                }
                             }
                         }
                     }
                 } catch (e) { 
-                    console.error("Erro na sincronização automática:", e); 
+                    console.error("Erro na sincronização:", e); 
                 } finally { 
                     setIsSyncing(false); 
                 }
@@ -217,14 +229,13 @@
 
             // --- SINCRONIZAÇÃO AUTOMÁTICA ---
             useEffect(() => {
-                // Sincroniza ao mudar de aba
                 if (activeTab !== 'home' && user && assets.length > 0) {
                     const timer = setTimeout(() => {
                         syncPrices(activeTab);
-                    }, 500); // Pequeno delay para evitar chamadas excessivas
+                    }, 800); 
                     return () => clearTimeout(timer);
                 }
-            }, [activeTab, user]); // Só dispara quando a aba ou usuário muda
+            }, [activeTab, user, assets.length]); 
 
             const saveGoal = async () => {
                 if (!user) return;
@@ -239,7 +250,7 @@
                 const id = Date.now().toString();
                 await FSDK.setDoc(FSDK.doc(db, 'artifacts', appId, 'users', user.uid, 'assets', id), {
                     ...newAsset,
-                    name: newAsset.name.toUpperCase(),
+                    name: newAsset.name.toUpperCase().trim(),
                     category: activeTab,
                     qty: parseFloat(newAsset.qty),
                     avgPrice: parseFloat(newAsset.avgPrice || 0),
@@ -298,7 +309,7 @@
                                 <h1 className="font-black tracking-tighter text-xl uppercase text-white">R.I <span className="text-cyan-500 text-white">SISTEMA</span></h1>
                             </div>
                             <div className="flex items-center gap-3">
-                                {isSyncing && <div className="text-[10px] font-bold text-cyan-400 animate-pulse-cyan uppercase hidden md:block">Sincronizando B3...</div>}
+                                {isSyncing && <div className="text-[10px] font-bold text-cyan-400 animate-pulse-cyan uppercase hidden md:block tracking-widest">Sincronizando Mercado...</div>}
                                 <Icons.Cloud size={20} className={isSyncing ? "text-cyan-500 animate-pulse" : "text-emerald-500/50"} />
                             </div>
                         </div>
@@ -395,7 +406,6 @@
                                     {processedAssets.filter(a => a.category === activeTab).map(asset => (
                                         <div key={asset.id} className="bg-zinc-900/15 border border-zinc-900 p-6 rounded-[2rem] flex flex-col gap-6 hover:bg-zinc-900/25 transition-all group border-l-4" style={{ borderLeftColor: STRATEGY.find(t => t.id === activeTab).color }}>
                                             
-                                            {/* Cabeçalho do Ativo */}
                                             <div className="flex justify-between items-start">
                                                 <div className="flex items-center gap-5">
                                                     <div className="w-14 h-14 bg-white/5 rounded-2xl flex items-center justify-center font-black text-[11px] text-zinc-400 uppercase tracking-tighter border border-white/5">
@@ -414,7 +424,6 @@
                                                 </button>
                                             </div>
 
-                                            {/* Grid de Informações Solicitadas */}
                                             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-4 border-t border-zinc-900/50">
                                                 <div className="flex flex-col">
                                                     <span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1">Quantidade</span>
