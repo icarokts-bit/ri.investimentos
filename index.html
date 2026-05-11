@@ -57,7 +57,6 @@
             animation: pulse-cyan 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
         }
         
-        /* Estilo para a lista de sugestões */
         .suggestion-list {
             max-height: 300px;
             overflow-y: auto;
@@ -155,7 +154,6 @@
             const [isSyncing, setIsSyncing] = useState(false);
             const [newAsset, setNewAsset] = useState({ name: '', qty: '', avgPrice: '', currentPrice: '' });
             
-            // Lista de Tickers Sincronizada da API (Objectos com ticker e nome)
             const [apiTickers, setApiTickers] = useState([]);
             const [suggestions, setSuggestions] = useState([]);
             const [showSuggestions, setShowSuggestions] = useState(false);
@@ -165,21 +163,40 @@
             const db = useMemo(() => FSDK.getFirestore(FSDK.initializeApp(firebaseConfig)), [FSDK]);
             const auth = useMemo(() => FSDK.getAuth(FSDK.initializeApp(firebaseConfig)), [FSDK]);
 
-            // --- CARREGAR TICKERS DA DADOS DE MERCADO ---
+            // --- CARREGAR TICKERS DA DADOS DE MERCADO COM HEADER DE AUTORIZAÇÃO ---
             useEffect(() => {
-                const fetchTickers = async () => {
+                const fetchMarketData = async () => {
                     try {
-                        const res = await fetch(`${DM_API_BASE}/tickers?token=${DM_TOKEN}`);
-                        if (res.ok) {
-                            const data = await res.json();
-                            // Data vem como array de objetos: { ticker, name }
-                            setApiTickers(data);
+                        const headers = { "Authorization": `Bearer ${DM_TOKEN}` };
+                        
+                        // Busca tickers e empresas para um autocomplete rico
+                        const [resTickers, resCompanies, resReits] = await Promise.all([
+                            fetch(`${DM_API_BASE}/tickers`, { headers }),
+                            fetch(`${DM_API_BASE}/companies`, { headers }),
+                            fetch(`${DM_API_BASE}/reits`, { headers })
+                        ]);
+
+                        if (resTickers.ok && resCompanies.ok) {
+                            const tickers = await resTickers.json();
+                            const companies = await resCompanies.json();
+                            const reits = resReits.ok ? await resReits.json() : [];
+
+                            // Mescla tickers com nomes de empresas/FIIs
+                            const masterList = tickers.map(t => {
+                                // Tenta encontrar o nome na lista de empresas ou REITs
+                                const info = companies.find(c => c.ticker === t.ticker) || 
+                                             reits.find(r => r.ticker === t.ticker) || 
+                                             { name: t.name || 'Empresa B3' };
+                                return { ticker: t.ticker, name: info.name };
+                            });
+
+                            setApiTickers(masterList);
                         }
                     } catch (e) { 
                         console.error("Erro ao carregar lista de ativos:", e); 
                     }
                 };
-                fetchTickers();
+                fetchMarketData();
             }, []);
 
             useEffect(() => {
@@ -214,7 +231,7 @@
                 return () => document.removeEventListener("mousedown", handleClickOutside);
             }, []);
 
-            // --- SINCRONIZAÇÃO VIA DADOS DE MERCADO ---
+            // --- SINCRONIZAÇÃO VIA DADOS DE MERCADO COM HEADER DE AUTORIZAÇÃO ---
             const syncPrices = useCallback(async (forcedTab = null) => {
                 const tabToSync = forcedTab || activeTab;
                 if (!user || isSyncing || tabToSync === 'home' || tabToSync === 'caixa') return;
@@ -224,13 +241,17 @@
                 
                 setIsSyncing(true);
                 try {
+                    const headers = { "Authorization": `Bearer ${DM_TOKEN}` };
+                    
                     const updatePromises = tabAssets.map(async (asset) => {
                         try {
                             const ticker = asset.name.trim().toUpperCase();
-                            const res = await fetch(`${DM_API_BASE}/tickers/${ticker}/quotes?token=${DM_TOKEN}`);
+                            // Consulta o endpoint de quotes conforme curl fornecido
+                            const res = await fetch(`${DM_API_BASE}/tickers/${ticker}/quotes`, { headers });
                             if (res.ok) {
                                 const quotes = await res.json();
                                 if (quotes.length > 0) {
+                                    // Pega a cotação mais recente (normalmente o fechamento)
                                     const latest = quotes[quotes.length - 1];
                                     await FSDK.updateDoc(FSDK.doc(db, 'artifacts', appId, 'users', user.uid, 'assets', asset.id), { 
                                         currentPrice: latest.close, 
@@ -283,7 +304,6 @@
                 if (user) await FSDK.deleteDoc(FSDK.doc(db, 'artifacts', appId, 'users', user.uid, 'assets', id));
             };
 
-            // Lógica de Autocomplete Robusta (Pesquisa por ticker ou nome)
             const handleTickerChange = (val) => {
                 const term = val.toUpperCase();
                 setNewAsset({...newAsset, name: term});
@@ -295,12 +315,11 @@
                             item.name.toUpperCase().includes(term)
                         )
                         .sort((a, b) => {
-                            // Prioridade para tickers que começam com o termo
                             if (a.ticker.startsWith(term) && !b.ticker.startsWith(term)) return -1;
                             if (!a.ticker.startsWith(term) && b.ticker.startsWith(term)) return 1;
                             return a.ticker.localeCompare(b.ticker);
                         })
-                        .slice(0, 15); // Aumentado para 15 sugestões
+                        .slice(0, 15);
                     
                     setSuggestions(filtered);
                     setShowSuggestions(filtered.length > 0);
@@ -314,7 +333,6 @@
                 setShowSuggestions(false);
             };
 
-            // Lógica de Processamento e Soma
             const processedAssets = useMemo(() => assets.map(a => {
                 const qty = parseFloat(a.qty) || 0;
                 const avgPrice = parseFloat(a.avgPrice) || 0;
@@ -331,18 +349,8 @@
             }), [assets]);
 
             const totals = useMemo(() => {
-                const res = { 
-                    acoes: { invested: 0, current: 0 }, 
-                    realestate: { invested: 0, current: 0 }, 
-                    caixa: { invested: 0, current: 0 }, 
-                    internacional: { invested: 0, current: 0 } 
-                };
-                processedAssets.forEach(a => { 
-                    if(res[a.category]) {
-                        res[a.category].invested += a.totalInvested;
-                        res[a.category].current += a.totalCurrent;
-                    }
-                });
+                const res = { acoes: { invested: 0, current: 0 }, realestate: { invested: 0, current: 0 }, caixa: { invested: 0, current: 0 }, internacional: { invested: 0, current: 0 } };
+                processedAssets.forEach(a => { if(res[a.category]) { res[a.category].invested += a.totalInvested; res[a.category].current += a.totalCurrent; } });
                 return res;
             }, [processedAssets]);
 
@@ -352,7 +360,7 @@
             const shareGoal = totalGoal / 4;
             const formatBRL = (v) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
 
-            if (!user) return <div className="h-screen bg-black flex flex-col items-center justify-center gap-4 text-white"><Icons.Loader2 size={40} className="text-cyan-500" /><p className="text-[10px] font-black tracking-widest uppercase">A ligar ao sistema Tribo...</p></div>;
+            if (!user) return <div className="h-screen bg-black flex flex-col items-center justify-center gap-4 text-white"><Icons.Loader2 size={40} className="text-cyan-500" /><p className="text-[10px] font-black tracking-widest uppercase text-white">A ligar ao sistema Tribo...</p></div>;
 
             return (
                 <div className="min-h-screen bg-[#050505] text-zinc-100 pb-32 selection:bg-cyan-500/20">
@@ -363,7 +371,7 @@
                                 <h1 className="font-black tracking-tighter text-xl uppercase text-white">R.I <span className="text-cyan-500 text-white">SISTEMA</span></h1>
                             </div>
                             <div className="flex items-center gap-3">
-                                {isSyncing && <div className="text-[10px] font-bold text-cyan-400 animate-pulse-cyan uppercase tracking-widest">Mercado em Tempo Real...</div>}
+                                {isSyncing && <div className="text-[10px] font-bold text-cyan-400 animate-pulse-cyan uppercase tracking-widest">Sincronizando Dados B3...</div>}
                                 <Icons.Cloud size={20} className={isSyncing ? "text-cyan-500 animate-pulse" : "text-emerald-500/50"} />
                             </div>
                         </div>
@@ -383,17 +391,17 @@
                                     </svg>
                                     <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center">
                                         <span className="text-[9px] font-black tracking-[0.4em] text-zinc-600 uppercase">DIVERSIFICAÇÃO</span>
-                                        <span className="text-3xl font-black tracking-tighter text-white">R.I <span className="font-thin opacity-30">INVEST</span></span>
+                                        <span className="text-3xl font-black tracking-tighter text-white">R.I <span className="font-light opacity-30">INVEST</span></span>
                                     </div>
                                 </div>
 
-                                <div className="bg-zinc-900/30 border border-zinc-900 p-8 rounded-[2.5rem] mb-10 grid grid-cols-1 md:grid-cols-2 gap-6 premium-shadow text-white">
+                                <div className="bg-zinc-900/30 border border-zinc-900 p-8 rounded-[2.5rem] mb-10 grid grid-cols-1 md:grid-cols-2 gap-6 premium-shadow">
                                     <div className="flex justify-between items-end">
                                         <div>
                                             <p className="text-[10px] font-black text-zinc-500 tracking-[0.2em] mb-2 uppercase text-white">Património Atualizado</p>
                                             <h3 className="text-4xl font-black tracking-tighter text-white">{formatBRL(grandTotalCurrent)}</h3>
                                         </div>
-                                        <button onClick={() => setIsEditGoal(!isEditGoal)} className="p-4 bg-white/5 rounded-2xl text-cyan-400 hover:scale-105 active:scale-95 transition-all"><Icons.Edit3 size={20} /></button>
+                                        <button onClick={() => setIsEditGoal(!isEditGoal)} className="p-4 bg-white/5 rounded-2xl text-cyan-400 hover:scale-105 active:scale-95 transition-all text-white"><Icons.Edit3 size={20} /></button>
                                     </div>
                                     <div className="border-l border-zinc-800 md:pl-6 flex flex-col justify-end">
                                         <p className="text-[10px] font-black text-zinc-500 tracking-[0.2em] mb-1 uppercase text-white">Total Investido (Aplicações)</p>
@@ -402,11 +410,11 @@
                                 </div>
 
                                 {isEditGoal && (
-                                    <div className="bg-zinc-900 p-8 rounded-[2.5rem] border border-cyan-500/30 mb-10 animate-in zoom-in-95 text-white">
-                                        <label className="text-[10px] font-black text-zinc-500 uppercase block mb-4">Meta Total de Alocação (ARCA)</label>
+                                    <div className="bg-zinc-900 p-8 rounded-[2.5rem] border border-cyan-500/30 mb-10 animate-in zoom-in-95">
+                                        <label className="text-[10px] font-black text-zinc-500 uppercase block mb-4 text-white">Meta Total de Alocação (ARCA)</label>
                                         <div className="flex gap-4">
                                             <input type="number" value={tempGoal} onChange={e => setTempGoal(e.target.value)} className="flex-1 bg-black border border-zinc-800 rounded-2xl px-6 py-4 text-xl font-bold focus:border-cyan-500 outline-none text-white" />
-                                            <button onClick={saveGoal} className="bg-cyan-500 text-black px-8 rounded-2xl font-black flex items-center justify-center hover:bg-cyan-400 active:scale-95 transition-all"><Icons.Check size={20} /></button>
+                                            <button onClick={saveGoal} className="bg-cyan-500 text-black px-8 rounded-2xl font-black flex items-center justify-center hover:bg-cyan-400 active:scale-95 transition-all text-white"><Icons.Check size={20} /></button>
                                         </div>
                                     </div>
                                 )}
@@ -418,10 +426,10 @@
                                             <button key={cat.id} onClick={() => setActiveTab(cat.id)} className="w-full bg-zinc-900/20 border border-zinc-900 p-6 rounded-[2rem] flex items-center justify-between group hover:bg-zinc-900/40 transition-all border-l-4" style={{ borderLeftColor: cat.color }}>
                                                 <div className="flex items-center gap-5">
                                                     <div className="p-3.5 rounded-xl bg-white/5 text-white/90 group-hover:scale-110 transition-transform"><cat.icon size={18} /></div>
-                                                    <div className="text-left"><h4 className="text-[10px] font-black text-zinc-600 mb-1 uppercase">{cat.label}</h4><p className="text-xl font-black text-white">{formatBRL(total)}</p></div>
+                                                    <div className="text-left"><h4 className="text-[10px] font-black text-zinc-600 mb-1 uppercase text-white">{cat.label}</h4><p className="text-xl font-black text-white">{formatBRL(total)}</p></div>
                                                 </div>
                                                 <div className="text-right">
-                                                    <div className="text-[10px] font-black text-zinc-500 mb-1.5">{grandTotalCurrent > 0 ? ((total/grandTotalCurrent)*100).toFixed(1) : 0}%</div>
+                                                    <div className="text-[10px] font-black text-zinc-500 mb-1.5 text-white">{grandTotalCurrent > 0 ? ((total/grandTotalCurrent)*100).toFixed(1) : 0}%</div>
                                                     <div className={`text-[9px] font-black px-3 py-1 rounded-full uppercase ${diff > 0 ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'}`}>
                                                         {diff > 0 ? `INVESTIR ${formatBRL(diff)}` : `EXCEDENTE ${formatBRL(Math.abs(diff))}`}
                                                     </div>
@@ -436,54 +444,37 @@
                                 <div className="flex justify-between items-end mb-10 pb-8 border-b border-zinc-900 text-white">
                                     <div><h2 className="text-3xl font-black uppercase text-white tracking-tighter" style={{ color: STRATEGY.find(t => t.id === activeTab).color }}>{STRATEGY.find(t => t.id === activeTab).label}</h2></div>
                                     <div className="flex items-center gap-4 text-right">
-                                        <button onClick={() => syncPrices()} disabled={isSyncing} className="p-3.5 bg-zinc-900 border border-zinc-800 rounded-xl text-cyan-400 hover:bg-zinc-800 active:scale-90 transition-all">{isSyncing ? <Icons.Loader2 size={20} /> : <Icons.RefreshCw size={20} />}</button>
-                                        <div className="text-white"><p className="text-[9px] font-black text-zinc-700 uppercase">Investido nesta Classe</p><p className="text-2xl font-black text-white tracking-tighter">{formatBRL(totals[activeTab].invested)}</p></div>
+                                        <button onClick={() => syncPrices()} disabled={isSyncing} className="p-3.5 bg-zinc-900 border border-zinc-800 rounded-xl text-cyan-400 hover:bg-zinc-800 active:scale-90 transition-all text-white">{isSyncing ? <Icons.Loader2 size={20} /> : <Icons.RefreshCw size={20} />}</button>
+                                        <div className="text-white"><p className="text-[9px] font-black text-zinc-700 uppercase text-white">Investido nesta Classe</p><p className="text-2xl font-black text-white tracking-tighter">{formatBRL(totals[activeTab].invested)}</p></div>
                                     </div>
                                 </div>
 
-                                <form onSubmit={addAsset} className="bg-zinc-900/20 border border-zinc-900 p-8 rounded-[2.5rem] mb-10 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 items-end text-white premium-shadow text-white relative">
+                                <form onSubmit={addAsset} className="bg-zinc-900/20 border border-zinc-900 p-8 rounded-[2.5rem] mb-10 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 items-end premium-shadow relative">
                                     <div className="space-y-2 relative" ref={suggestionRef}>
-                                        <label className="text-[9px] font-black text-zinc-600 uppercase ml-3 tracking-widest">Ticker ou Empresa</label>
+                                        <label className="text-[9px] font-black text-zinc-600 uppercase ml-3 tracking-widest text-white">Ticker ou Empresa</label>
                                         <div className="relative">
-                                            <input 
-                                                required 
-                                                type="text" 
-                                                placeholder="EX: PETR4 ou PETROBRAS" 
-                                                autoComplete="off"
-                                                value={newAsset.name} 
-                                                onChange={e => handleTickerChange(e.target.value)} 
-                                                onFocus={() => handleTickerChange(newAsset.name)} 
-                                                className="w-full bg-black border border-zinc-800 rounded-2xl p-4 pl-12 text-sm font-bold focus:border-cyan-500 outline-none text-white uppercase transition-all" 
-                                            />
-                                            <div className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-600">
-                                                <Icons.Search size={18} />
-                                            </div>
+                                            <input required type="text" placeholder="EX: PETR4 ou PETROBRAS" autoComplete="off" value={newAsset.name} onChange={e => handleTickerChange(e.target.value)} onFocus={() => handleTickerChange(newAsset.name)} className="w-full bg-black border border-zinc-800 rounded-2xl p-4 pl-12 text-sm font-bold focus:border-cyan-500 outline-none text-white uppercase transition-all text-white" />
+                                            <div className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-600"><Icons.Search size={18} /></div>
                                         </div>
-                                        
-                                        {/* Lista de Sugestões / Autocomplete com Nomes das Empresas */}
                                         {showSuggestions && (
                                             <div className="absolute top-full left-0 right-0 mt-2 bg-[#0A0A0A] border border-zinc-800 rounded-2xl overflow-hidden z-[100] shadow-2xl animate-in fade-in zoom-in-95 duration-200">
                                                 <ul className="suggestion-list">
                                                     {suggestions.map((item, idx) => (
-                                                        <li 
-                                                            key={idx} 
-                                                            onClick={() => selectSuggestion(item.ticker)} 
-                                                            className="px-6 py-4 hover:bg-cyan-500/10 cursor-pointer border-b border-zinc-900 last:border-none flex flex-col transition-colors group"
-                                                        >
+                                                        <li key={idx} onClick={() => selectSuggestion(item.ticker)} className="px-6 py-4 hover:bg-cyan-500/10 cursor-pointer border-b border-zinc-900 last:border-none flex flex-col transition-colors group">
                                                             <div className="flex justify-between items-center mb-1">
                                                                 <span className="font-black text-sm text-cyan-400 group-hover:text-white transition-colors">{item.ticker}</span>
-                                                                <span className="text-[8px] text-zinc-700 uppercase tracking-widest bg-zinc-900/50 px-2 py-0.5 rounded">B3 OFICIAL</span>
+                                                                <span className="text-[8px] text-zinc-700 uppercase tracking-widest bg-zinc-900/50 px-2 py-0.5 rounded text-white">B3 DADOS DE MERCADO</span>
                                                             </div>
-                                                            <span className="text-[10px] text-zinc-500 group-hover:text-zinc-300 transition-colors truncate">{item.name}</span>
+                                                            <span className="text-[10px] text-zinc-500 group-hover:text-zinc-300 transition-colors truncate text-white">{item.name}</span>
                                                         </li>
                                                     ))}
                                                 </ul>
                                             </div>
                                         )}
                                     </div>
-                                    <div className="space-y-2"><label className="text-[9px] font-black text-zinc-600 uppercase ml-3 tracking-widest">Quantidade</label><input required type="number" step="any" value={newAsset.qty} onChange={e => setNewAsset({...newAsset, qty: e.target.value})} className="w-full bg-black border border-zinc-800 rounded-2xl p-4 text-sm font-bold outline-none text-white" /></div>
-                                    <div className="space-y-2"><label className="text-[9px] font-black text-zinc-600 uppercase ml-3 tracking-widest">Preço Médio</label><input required type="number" step="0.01" value={newAsset.avgPrice} onChange={e => setNewAsset({...newAsset, avgPrice: e.target.value})} className="w-full bg-black border border-zinc-800 rounded-2xl p-4 text-sm font-bold outline-none text-white" /></div>
-                                    <button type="submit" className="bg-white text-black font-black text-[10px] h-[58px] rounded-2xl tracking-[0.2em] uppercase hover:bg-cyan-500 transition-all active:scale-95 shadow-lg">ADICIONAR</button>
+                                    <div className="space-y-2"><label className="text-[9px] font-black text-zinc-600 uppercase ml-3 tracking-widest text-white">Quantidade</label><input required type="number" step="any" value={newAsset.qty} onChange={e => setNewAsset({...newAsset, qty: e.target.value})} className="w-full bg-black border border-zinc-800 rounded-2xl p-4 text-sm font-bold outline-none text-white" /></div>
+                                    <div className="space-y-2"><label className="text-[9px] font-black text-zinc-600 uppercase ml-3 tracking-widest text-white">Preço Médio</label><input required type="number" step="0.01" value={newAsset.avgPrice} onChange={e => setNewAsset({...newAsset, avgPrice: e.target.value})} className="w-full bg-black border border-zinc-800 rounded-2xl p-4 text-sm font-bold outline-none text-white" /></div>
+                                    <button type="submit" className="bg-white text-black font-black text-[10px] h-[58px] rounded-2xl tracking-[0.2em] uppercase hover:bg-cyan-500 transition-all active:scale-95 shadow-lg text-white">ADICIONAR</button>
                                 </form>
 
                                 <div className="space-y-6">
@@ -492,9 +483,9 @@
                                             <div className="flex justify-between items-start">
                                                 <div className="flex items-center gap-5">
                                                     <div className="w-14 h-14 bg-white/5 rounded-2xl flex items-center justify-center font-black text-[11px] text-zinc-400 uppercase tracking-tighter border border-white/5">{asset.name.substring(0, 4)}</div>
-                                                    <div><h4 className="font-black text-lg text-white uppercase tracking-tight flex items-center gap-2">{asset.name}<span className="text-[9px] bg-white/10 px-2 py-0.5 rounded text-zinc-500 uppercase tracking-widest">Ativo</span></h4><p className="text-[10px] font-bold text-zinc-600 uppercase mt-0.5 tracking-widest">Posição Detalhada</p></div>
+                                                    <div><h4 className="font-black text-lg text-white uppercase tracking-tight flex items-center gap-2 text-white">{asset.name}<span className="text-[9px] bg-white/10 px-2 py-0.5 rounded text-zinc-500 uppercase tracking-widest text-white">Ativo</span></h4><p className="text-[10px] font-bold text-zinc-600 uppercase mt-0.5 tracking-widest text-white">Posição Detalhada</p></div>
                                                 </div>
-                                                <button onClick={() => removeAsset(asset.id)} className="p-3 text-zinc-800 hover:text-rose-500 hover:bg-rose-500/10 rounded-xl transition-all"><Icons.Trash2 size={18} /></button>
+                                                <button onClick={() => removeAsset(asset.id)} className="p-3 text-zinc-800 hover:text-rose-500 hover:bg-rose-500/10 rounded-xl transition-all text-white"><Icons.Trash2 size={18} /></button>
                                             </div>
                                             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-4 border-t border-zinc-900/50">
                                                 <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1 text-white">Quantidade</span><span className="text-sm font-bold text-white">{asset.qty} UN</span></div>
@@ -512,7 +503,7 @@
                         )}
                     </main>
 
-                    <nav className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-[#0A0A0A]/90 backdrop-blur-md border border-zinc-800/50 p-2.5 rounded-[2.5rem] flex items-center gap-2 z-50 shadow-[0_30px_60px_rgba(0,0,0,0.7)] text-white text-white">
+                    <nav className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-[#0A0A0A]/90 backdrop-blur-md border border-zinc-800/50 p-2.5 rounded-[2.5rem] flex items-center gap-2 z-50 shadow-[0_30px_60px_rgba(0,0,0,0.7)] text-white">
                         <button onClick={() => setActiveTab('home')} className={`p-4 rounded-[1.8rem] transition-all flex items-center gap-3 ${activeTab === 'home' ? 'bg-cyan-500 text-black shadow-[0_0_25px_rgba(0,212,197,0.4)]' : 'text-zinc-600 hover:bg-zinc-900'}`}><Icons.LayoutGrid size={20} strokeWidth={2.5} /><span className={activeTab === 'home' ? 'text-[10px] font-black tracking-widest uppercase pr-2' : 'hidden'}>Dashboard</span></button>
                         <div className="w-px h-6 bg-zinc-800/50 mx-1.5"></div>
                         {STRATEGY.map(tab => (
