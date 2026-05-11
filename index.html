@@ -188,7 +188,7 @@
                 return () => document.removeEventListener("mousedown", handleClickOutside);
             }, []);
 
-            // --- SINCRONIZAÇÃO COM BRAPI ---
+            // --- SINCRONIZAÇÃO COM BRAPI CORRIGIDA ---
             const syncPrices = useCallback(async (forcedTab = null) => {
                 const tabToSync = forcedTab || activeTab;
                 if (!user || isSyncing || tabToSync === 'home' || tabToSync === 'caixa') return;
@@ -198,9 +198,17 @@
                 
                 setIsSyncing(true);
                 try {
-                    const tickersList = tabAssets.map(a => a.name.toUpperCase()).join(',');
+                    // Puxar tickers formatados (Remover espaços e garantir maiúsculas)
+                    const tickersList = tabAssets.map(a => a.name.trim().toUpperCase()).join(',');
+                    
+                    // Usar o formato de cabeçalho Bearer conforme snippet do utilizador
                     const response = await fetch(
-                        `https://brapi.dev/api/quote/${tickersList}?token=${BRAPI_TOKEN}`
+                        `https://brapi.dev/api/quote/${tickersList}?modules=summaryProfile`,
+                        {
+                            headers: {
+                                "Authorization": `Bearer ${BRAPI_TOKEN}`
+                            }
+                        }
                     );
 
                     if (!response.ok) throw new Error("Erro na BrAPI");
@@ -208,7 +216,7 @@
                     
                     if (data.results && data.results.length > 0) {
                         for (const result of data.results) {
-                            const asset = tabAssets.find(a => a.name.toUpperCase() === result.symbol.toUpperCase());
+                            const asset = tabAssets.find(a => a.name.trim().toUpperCase() === result.symbol.toUpperCase());
                             if (asset && result.regularMarketPrice) {
                                 await FSDK.updateDoc(FSDK.doc(db, 'artifacts', appId, 'users', user.uid, 'assets', asset.id), { 
                                     currentPrice: result.regularMarketPrice, 
@@ -275,14 +283,14 @@
                 setShowSuggestions(false);
             };
 
-            // Lógica de Processamento e Soma
+            // Lógica de Processamento e Soma CORRIGIDA
             const processedAssets = useMemo(() => assets.map(a => {
                 const qty = parseFloat(a.qty) || 0;
                 const avgPrice = parseFloat(a.avgPrice) || 0;
                 const currentPrice = parseFloat(a.currentPrice) || 0;
 
                 const totalInvested = qty * avgPrice;
-                // Se o preço atual for zero (ainda não sincronizado), usamos o preço médio como base para não zerar o património
+                // Se o preço atual for zero (ainda não sincronizado), usamos o preço médio para não zerar a soma
                 const priceForCurrent = (currentPrice > 0) ? currentPrice : avgPrice;
                 const totalCurrent = qty * priceForCurrent;
                 
