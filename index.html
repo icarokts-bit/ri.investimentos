@@ -127,17 +127,14 @@
             { id: 'internacional', label: 'A - ALTERNATIVOS', color: '#EF4444', icon: Icons.Globe, desc: 'Mercado Global' }
         ];
 
-        // Lista Expandida de Tickers da B3 (Ações e FIIs) e Internacionais
+        // Lista de Tickers da B3 e Internacionais
         const POPULAR_TICKERS = [
-            // Blue Chips B3
             "PETR4", "PETR3", "VALE3", "ITUB4", "BBDC4", "BBDC3", "ABEV3", "BBAS3", "ITSA4", "B3SA3", "WEGE3", "MGLU3", "PRIO3", "SLCE3",
             "RENT3", "GGBR4", "CSNA3", "SUZB3", "JBSS3", "RAIL3", "RADL3", "EQTL3", "CPLE6", "TRPL4", "VIVT3", "TIMS3", "SBSP3", "ELET3", 
             "ELET6", "LREN3", "HYPE3", "UGPA3", "RAIZ4", "RDOR3", "ASAI3", "CRFB3", "NTCO3", "BRFS3", "EMBR3", "MULT3", "IGTI11", "YDUQ3", 
             "COGN3", "CVCB3", "AZUL4", "GOLL4", "MRVE3", "TEND3", "EZTC3", "CYRE3", "ALOS3", "ARZZ3", "DXCO3", "SMTO3", "KLBN11", "LWSA3",
-            // Principais Fundos Imobiliários (FIIs)
             "HGLG11", "KNRI11", "MXRF11", "XPLG11", "VISC11", "MALL11", "BCFF11", "BRCR11", "BTLG11", "XPML11", "VILG11", "KNIP11", "KNCR11",
             "HGBS11", "HGRU11", "IRDM11", "CPTS11", "RECR11", "VRTA11", "ALZR11", "TRXF11", "GALG11", "VGHF11", "VGIR11", "RBRR11", "HABT11", "RZTR11",
-            // Internacionais (Stocks/ETFs populares)
             "AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSLA", "NVDA", "NFLX", "AMD", "BRK.B", "VOO", "IVV", "QQQ", "SCHD", "VT", "VTI"
         ];
 
@@ -151,7 +148,6 @@
             const [isSyncing, setIsSyncing] = useState(false);
             const [newAsset, setNewAsset] = useState({ name: '', qty: '', avgPrice: '', currentPrice: '' });
             
-            // Estado para Autocomplete
             const [suggestions, setSuggestions] = useState([]);
             const [showSuggestions, setShowSuggestions] = useState(false);
             const suggestionRef = useRef(null);
@@ -182,7 +178,6 @@
                 return () => { unsubGoal(); unsubAssets(); };
             }, [user, db, FSDK]);
 
-            // Clique fora para fechar sugestões
             useEffect(() => {
                 const handleClickOutside = (event) => {
                     if (suggestionRef.current && !suggestionRef.current.contains(event.target)) {
@@ -202,17 +197,20 @@
                 
                 setIsSyncing(true);
                 try {
+                    // Prepara tickers para busca no Google via Gemini
                     const tickersSearch = tabAssets.map(a => {
                         const name = a.name.toUpperCase();
+                        // Adiciona .SA para B3 se não tiver
                         if ((tabToSync === 'acoes' || tabToSync === 'realestate') && !name.includes('.')) {
                             return `${name}.SA`;
                         }
                         return name;
                     });
 
-                    const prompt = `Age como um terminal Bloomberg. Fornece o preço atual (última cotação) em Reais (BRL) para estes ativos: ${tickersSearch.join(', ')}. 
-                    Responde EXCLUSIVAMENTE com um objeto JSON no formato: {"NOME_DO_ATIVO_ORIGINAL": preco_decimal}. 
-                    Usa os nomes originais como chaves: ${tabAssets.map(a => a.name).join(', ')}.`;
+                    const prompt = `Aja como um terminal financeiro. Use o Google Search para encontrar o PREÇO ATUAL (Última Cotação) de fechamento ou tempo real na B3 para: ${tickersSearch.join(', ')}. 
+                    Se for brasileiro, garanta o valor em Reais (BRL). 
+                    Responda EXCLUSIVAMENTE com um JSON puro no formato: {"TICKER": valor_float}. 
+                    Exemplo: {"PETR4": 36.50, "VALE3": 62.10}. Use os tickers originais como chaves.`;
 
                     const res = await fetch(`${GEMINI_URL}?key=${apiKey}`, {
                         method: 'POST',
@@ -229,10 +227,15 @@
                     
                     if (textContent) {
                         const jsonStr = textContent.match(/\{[\s\S]*\}/)?.[0] || textContent;
-                        const prices = JSON.parse(jsonStr);
+                        const pricesMap = JSON.parse(jsonStr);
                         
                         for (const asset of tabAssets) {
-                            const priceFound = prices[asset.name] || prices[asset.name.toUpperCase()];
+                            const assetKey = asset.name.toUpperCase();
+                            // Tenta várias combinações para garantir que o valor seja encontrado
+                            const priceFound = pricesMap[assetKey] || 
+                                               pricesMap[assetKey + '.SA'] || 
+                                               pricesMap[assetKey.replace('.SA', '')];
+
                             if (priceFound && typeof priceFound === 'number' && priceFound > 0) {
                                 await FSDK.updateDoc(FSDK.doc(db, 'artifacts', appId, 'users', user.uid, 'assets', asset.id), { 
                                     currentPrice: priceFound, 
@@ -328,7 +331,7 @@
                                 <h1 className="font-black tracking-tighter text-xl uppercase text-white">R.I <span className="text-cyan-500 text-white">SISTEMA</span></h1>
                             </div>
                             <div className="flex items-center gap-3">
-                                {isSyncing && <div className="text-[10px] font-bold text-cyan-400 animate-pulse-cyan uppercase tracking-widest">Sincronizando...</div>}
+                                {isSyncing && <div className="text-[10px] font-bold text-cyan-400 animate-pulse-cyan uppercase tracking-widest">Sincronizando Mercado...</div>}
                                 <Icons.Cloud size={20} className={isSyncing ? "text-cyan-500 animate-pulse" : "text-emerald-500/50"} />
                             </div>
                         </div>
@@ -410,7 +413,6 @@
                                             className="w-full bg-black border border-zinc-800 rounded-2xl p-4 text-sm font-bold focus:border-cyan-500 outline-none text-white uppercase transition-all" 
                                         />
                                         
-                                        {/* Dropdown de Sugestões Inteligentes */}
                                         {showSuggestions && (
                                             <ul className="absolute top-full left-0 right-0 mt-2 bg-[#0A0A0A] border border-zinc-800 rounded-2xl overflow-hidden z-[100] shadow-2xl animate-in fade-in zoom-in-95 duration-200">
                                                 {suggestions.map((ticker, idx) => (
@@ -424,7 +426,7 @@
                                                             {ticker}
                                                         </span>
                                                         <span className="text-[8px] text-zinc-700 uppercase tracking-widest">
-                                                            {ticker.length > 5 || ticker.includes('11') ? 'B3 BRASIL' : 'GLOBAL'}
+                                                            {(ticker.length >= 5 && !ticker.includes('.')) || ticker.includes('11') ? 'B3 BRASIL' : 'GLOBAL'}
                                                         </span>
                                                     </li>
                                                 ))}
