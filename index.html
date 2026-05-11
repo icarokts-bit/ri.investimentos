@@ -127,12 +127,18 @@
             { id: 'internacional', label: 'A - ALTERNATIVOS', color: '#EF4444', icon: Icons.Globe, desc: 'Mercado Global' }
         ];
 
-        // Lista de tickers populares para Autocomplete
+        // Lista Expandida de Tickers da B3 (Ações e FIIs) e Internacionais
         const POPULAR_TICKERS = [
-            "PETR4", "VALE3", "ITUB4", "BBDC4", "ABEV3", "BBAS3", "ITSA4", "B3SA3", "WEGE3", "MGLU3", "PRIO3", "SLCE3",
-            "RENT3", "GGBR4", "CSNA3", "SUZB3", "JBSS3", "RAIL3", "RADL3", "EQTL3", "CPLE6", "TRPL4", "VIVT3", "TIMS3",
-            "HGLG11", "KNRI11", "MXRF11", "XPLG11", "VISC11", "MALL11", "BCFF11", "BRCR11", "BTLG11", "XPML11", "VILG11",
-            "AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSLA", "NVDA", "NFLX", "AMD", "BRK.B", "VOO", "IVV", "QQQ"
+            // Blue Chips B3
+            "PETR4", "PETR3", "VALE3", "ITUB4", "BBDC4", "BBDC3", "ABEV3", "BBAS3", "ITSA4", "B3SA3", "WEGE3", "MGLU3", "PRIO3", "SLCE3",
+            "RENT3", "GGBR4", "CSNA3", "SUZB3", "JBSS3", "RAIL3", "RADL3", "EQTL3", "CPLE6", "TRPL4", "VIVT3", "TIMS3", "SBSP3", "ELET3", 
+            "ELET6", "LREN3", "HYPE3", "UGPA3", "RAIZ4", "RDOR3", "ASAI3", "CRFB3", "NTCO3", "BRFS3", "EMBR3", "MULT3", "IGTI11", "YDUQ3", 
+            "COGN3", "CVCB3", "AZUL4", "GOLL4", "MRVE3", "TEND3", "EZTC3", "CYRE3", "ALOS3", "ARZZ3", "DXCO3", "SMTO3", "KLBN11", "LWSA3",
+            // Principais Fundos Imobiliários (FIIs)
+            "HGLG11", "KNRI11", "MXRF11", "XPLG11", "VISC11", "MALL11", "BCFF11", "BRCR11", "BTLG11", "XPML11", "VILG11", "KNIP11", "KNCR11",
+            "HGBS11", "HGRU11", "IRDM11", "CPTS11", "RECR11", "VRTA11", "ALZR11", "TRXF11", "GALG11", "VGHF11", "VGIR11", "RBRR11", "HABT11", "RZTR11",
+            // Internacionais (Stocks/ETFs populares)
+            "AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSLA", "NVDA", "NFLX", "AMD", "BRK.B", "VOO", "IVV", "QQQ", "SCHD", "VT", "VTI"
         ];
 
         function App() {
@@ -281,7 +287,7 @@
                 setNewAsset({...newAsset, name: upperVal});
                 
                 if (upperVal.length > 0) {
-                    const filtered = POPULAR_TICKERS.filter(t => t.startsWith(upperVal)).slice(0, 5);
+                    const filtered = POPULAR_TICKERS.filter(t => t.startsWith(upperVal)).slice(0, 6);
                     setSuggestions(filtered);
                     setShowSuggestions(filtered.length > 0);
                 } else {
@@ -319,7 +325,7 @@
                         <div className="flex justify-between items-center max-w-4xl mx-auto">
                             <div className="flex items-center gap-3">
                                 <div className="w-9 h-9 bg-cyan-500 rounded-xl flex items-center justify-center shadow-[0_0_20px_rgba(0,212,197,0.3)]"><Icons.TrendingUp size={20} color="#000" /></div>
-                                <h1 className="font-black tracking-tighter text-xl uppercase text-white">R.I <span className="text-cyan-500">SISTEMA</span></h1>
+                                <h1 className="font-black tracking-tighter text-xl uppercase text-white">R.I <span className="text-cyan-500 text-white">SISTEMA</span></h1>
                             </div>
                             <div className="flex items-center gap-3">
                                 {isSyncing && <div className="text-[10px] font-bold text-cyan-400 animate-pulse-cyan uppercase tracking-widest">Sincronizando...</div>}
@@ -331,7 +337,7 @@
                     <main className="max-w-4xl mx-auto px-6 pt-10">
                         {activeTab === 'home' ? (
                             <div className="animate-in fade-in slide-in-from-bottom-4 duration-700">
-                                <div className="relative flex items-center justify-center w-72 h-72 mx-auto my-12">
+                                <div className="relative flex items-center justify-center w-72 h-72 mx-auto my-12 text-white">
                                     <svg viewBox="0 0 200 200" className="transform -rotate-90 w-full h-full drop-shadow-[0_0_25px_rgba(0,0,0,0.8)]">
                                         {STRATEGY.map((cat, i, arr) => {
                                             const r = 82; const circ = 2 * Math.PI * r;
@@ -347,7 +353,7 @@
                                 </div>
 
                                 <div className="bg-zinc-900/30 border border-zinc-900 p-8 rounded-[2.5rem] mb-10 flex justify-between items-end premium-shadow">
-                                    <div><p className="text-[10px] font-black text-zinc-500 tracking-[0.2em] mb-2 uppercase">Património Atual</p><h3 className="text-4xl font-black tracking-tighter text-white">{formatBRL(grandTotal)}</h3></div>
+                                    <div><p className="text-[10px] font-black text-zinc-500 tracking-[0.2em] mb-2 uppercase text-white">Património Atual</p><h3 className="text-4xl font-black tracking-tighter text-white">{formatBRL(grandTotal)}</h3></div>
                                     <button onClick={() => setIsEditGoal(!isEditGoal)} className="p-4 bg-white/5 rounded-2xl text-cyan-400 hover:scale-105 active:scale-95 transition-all"><Icons.Edit3 size={20} /></button>
                                 </div>
 
@@ -367,7 +373,7 @@
                                         return (
                                             <button key={cat.id} onClick={() => setActiveTab(cat.id)} className="w-full bg-zinc-900/20 border border-zinc-900 p-6 rounded-[2rem] flex items-center justify-between group hover:bg-zinc-900/40 transition-all border-l-4" style={{ borderLeftColor: cat.color }}>
                                                 <div className="flex items-center gap-5">
-                                                    <div className="p-3.5 rounded-xl bg-white/5 text-white/90 group-hover:scale-110 transition-transform">{cat.icon}</div>
+                                                    <div className="p-3.5 rounded-xl bg-white/5 text-white/90 group-hover:scale-110 transition-transform"><cat.icon size={18} /></div>
                                                     <div className="text-left"><h4 className="text-[10px] font-black text-zinc-600 mb-1 uppercase">{cat.label}</h4><p className="text-xl font-black text-white">{formatBRL(total)}</p></div>
                                                 </div>
                                                 <div className="text-right">
@@ -393,7 +399,7 @@
 
                                 <form onSubmit={addAsset} className="bg-zinc-900/20 border border-zinc-900 p-8 rounded-[2.5rem] mb-10 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 items-end text-white premium-shadow">
                                     <div className="space-y-2 relative" ref={suggestionRef}>
-                                        <label className="text-[9px] font-black text-zinc-600 uppercase ml-3 tracking-widest">Ticker</label>
+                                        <label className="text-[9px] font-black text-zinc-600 uppercase ml-3 tracking-widest">Ticker (B3/Global)</label>
                                         <input 
                                             required 
                                             type="text" 
@@ -401,26 +407,31 @@
                                             value={newAsset.name} 
                                             onChange={e => handleTickerChange(e.target.value)} 
                                             onFocus={() => handleTickerChange(newAsset.name)}
-                                            className="w-full bg-black border border-zinc-800 rounded-2xl p-4 text-sm font-bold focus:border-cyan-500 outline-none text-white uppercase" 
+                                            className="w-full bg-black border border-zinc-800 rounded-2xl p-4 text-sm font-bold focus:border-cyan-500 outline-none text-white uppercase transition-all" 
                                         />
                                         
-                                        {/* Dropdown de Sugestões */}
+                                        {/* Dropdown de Sugestões Inteligentes */}
                                         {showSuggestions && (
-                                            <ul className="absolute top-full left-0 right-0 mt-2 bg-[#0A0A0A] border border-zinc-800 rounded-2xl overflow-hidden z-[100] shadow-2xl">
+                                            <ul className="absolute top-full left-0 right-0 mt-2 bg-[#0A0A0A] border border-zinc-800 rounded-2xl overflow-hidden z-[100] shadow-2xl animate-in fade-in zoom-in-95 duration-200">
                                                 {suggestions.map((ticker, idx) => (
                                                     <li 
                                                         key={idx} 
                                                         onClick={() => selectSuggestion(ticker)}
-                                                        className="px-6 py-3 hover:bg-white/5 cursor-pointer font-bold text-xs text-zinc-300 border-b border-zinc-900 last:border-none flex justify-between items-center"
+                                                        className="px-6 py-4 hover:bg-cyan-500/10 cursor-pointer font-black text-xs text-zinc-300 border-b border-zinc-900 last:border-none flex justify-between items-center transition-colors"
                                                     >
-                                                        {ticker}
-                                                        <Icons.ArrowUpRight size={10} className="text-zinc-700" />
+                                                        <span className="flex items-center gap-2">
+                                                            <div className="w-1.5 h-1.5 rounded-full bg-cyan-500"></div>
+                                                            {ticker}
+                                                        </span>
+                                                        <span className="text-[8px] text-zinc-700 uppercase tracking-widest">
+                                                            {ticker.length > 5 || ticker.includes('11') ? 'B3 BRASIL' : 'GLOBAL'}
+                                                        </span>
                                                     </li>
                                                 ))}
                                             </ul>
                                         )}
                                     </div>
-                                    <div className="space-y-2"><label className="text-[9px] font-black text-zinc-600 uppercase ml-3 tracking-widest">Qtd</label><input required type="number" step="any" value={newAsset.qty} onChange={e => setNewAsset({...newAsset, qty: e.target.value})} className="w-full bg-black border border-zinc-800 rounded-2xl p-4 text-sm font-bold outline-none text-white" /></div>
+                                    <div className="space-y-2"><label className="text-[9px] font-black text-zinc-600 uppercase ml-3 tracking-widest">Quantidade</label><input required type="number" step="any" value={newAsset.qty} onChange={e => setNewAsset({...newAsset, qty: e.target.value})} className="w-full bg-black border border-zinc-800 rounded-2xl p-4 text-sm font-bold outline-none text-white" /></div>
                                     <div className="space-y-2"><label className="text-[9px] font-black text-zinc-600 uppercase ml-3 tracking-widest">Preço Médio</label><input required type="number" step="0.01" value={newAsset.avgPrice} onChange={e => setNewAsset({...newAsset, avgPrice: e.target.value})} className="w-full bg-black border border-zinc-800 rounded-2xl p-4 text-sm font-bold outline-none text-white" /></div>
                                     <button type="submit" className="bg-white text-black font-black text-[10px] h-[58px] rounded-2xl tracking-[0.2em] uppercase hover:bg-cyan-500 transition-all active:scale-95 shadow-lg">ADICIONAR</button>
                                 </form>
@@ -436,13 +447,13 @@
                                                 <button onClick={() => removeAsset(asset.id)} className="p-3 text-zinc-800 hover:text-rose-500 hover:bg-rose-500/10 rounded-xl transition-all"><Icons.Trash2 size={18} /></button>
                                             </div>
                                             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-4 border-t border-zinc-900/50">
-                                                <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1">Quantidade</span><span className="text-sm font-bold text-white">{asset.qty} UN</span></div>
-                                                <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1">Preço Médio</span><span className="text-sm font-bold text-zinc-300">{formatBRL(asset.avgPrice)}</span></div>
-                                                <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1">Valor Atual</span><span className="text-sm font-bold text-cyan-400">{formatBRL(asset.currentPrice)}</span></div>
-                                                <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1">Total Investido</span><span className="text-sm font-bold text-zinc-400">{formatBRL(asset.totalInvested)}</span></div>
-                                                <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1">Total Atual</span><span className="text-sm font-black text-white">{formatBRL(asset.totalCurrent)}</span></div>
-                                                <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1">Lucro R$</span><span className={`text-sm font-black flex items-center gap-1 ${asset.profitVal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{asset.profitVal >= 0 ? <Icons.ArrowUpRight size={14} /> : <Icons.ArrowDownRight size={14} />}{formatBRL(asset.profitVal)}</span></div>
-                                                <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1">Lucro %</span><span className={`text-sm font-black ${asset.profitPerc >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{asset.profitPerc >= 0 ? '+' : ''}{asset.profitPerc.toFixed(2)}%</span></div>
+                                                <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1 text-white">Quantidade</span><span className="text-sm font-bold text-white">{asset.qty} UN</span></div>
+                                                <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1 text-white">Preço Médio</span><span className="text-sm font-bold text-zinc-300">{formatBRL(asset.avgPrice)}</span></div>
+                                                <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1 text-white">Valor Atual</span><span className="text-sm font-bold text-cyan-400">{formatBRL(asset.currentPrice)}</span></div>
+                                                <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1 text-white">Total Investido</span><span className="text-sm font-bold text-zinc-400">{formatBRL(asset.totalInvested)}</span></div>
+                                                <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1 text-white">Total Atual</span><span className="text-sm font-black text-white">{formatBRL(asset.totalCurrent)}</span></div>
+                                                <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1 text-white">Lucro R$</span><span className={`text-sm font-black flex items-center gap-1 ${asset.profitVal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{asset.profitVal >= 0 ? <Icons.ArrowUpRight size={14} /> : <Icons.ArrowDownRight size={14} />}{formatBRL(asset.profitVal)}</span></div>
+                                                <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1 text-white">Lucro %</span><span className={`text-sm font-black ${asset.profitPerc >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{asset.profitPerc >= 0 ? '+' : ''}{asset.profitPerc.toFixed(2)}%</span></div>
                                             </div>
                                         </div>
                                     ))}
@@ -451,7 +462,7 @@
                         )}
                     </main>
 
-                    <nav className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-[#0A0A0A]/90 backdrop-blur-3xl border border-zinc-800/50 p-2.5 rounded-[2.5rem] flex items-center gap-2 z-50 shadow-[0_30px_60px_rgba(0,0,0,0.7)] text-white">
+                    <nav className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-[#0A0A0A]/90 backdrop-blur-md border border-zinc-800/50 p-2.5 rounded-[2.5rem] flex items-center gap-2 z-50 shadow-[0_30px_60px_rgba(0,0,0,0.7)] text-white">
                         <button onClick={() => setActiveTab('home')} className={`p-4 rounded-[1.8rem] transition-all flex items-center gap-3 ${activeTab === 'home' ? 'bg-cyan-500 text-black shadow-[0_0_25px_rgba(0,212,197,0.4)]' : 'text-zinc-600 hover:bg-zinc-900'}`}><Icons.LayoutGrid size={20} strokeWidth={2.5} /><span className={activeTab === 'home' ? 'text-[10px] font-black tracking-widest uppercase pr-2' : 'hidden'}>Dashboard</span></button>
                         <div className="w-px h-6 bg-zinc-800/50 mx-1.5"></div>
                         {STRATEGY.map(tab => (
