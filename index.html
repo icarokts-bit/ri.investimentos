@@ -254,11 +254,20 @@
                 await FSDK.deleteDoc(FSDK.doc(db, 'artifacts', appId, 'users', user.uid, 'assets', id));
             };
 
-            const processedAssets = useMemo(() => assets.map(a => ({
-                ...a,
-                totalCurrent: a.qty * (a.currentPrice || 0),
-                profitPerc: (a.avgPrice > 0) ? (((a.currentPrice || 0) - a.avgPrice) / a.avgPrice) * 100 : 0
-            })), [assets]);
+            const processedAssets = useMemo(() => assets.map(a => {
+                const totalInvested = a.qty * (a.avgPrice || 0);
+                const totalCurrent = a.qty * (a.currentPrice || 0);
+                const profitVal = totalCurrent - totalInvested;
+                const profitPerc = (totalInvested > 0) ? (profitVal / totalInvested) * 100 : 0;
+                
+                return {
+                    ...a,
+                    totalInvested,
+                    totalCurrent,
+                    profitVal,
+                    profitPerc
+                };
+            }), [assets]);
 
             const totals = useMemo(() => {
                 const res = { acoes: 0, realestate: 0, caixa: 0, internacional: 0 };
@@ -382,19 +391,75 @@
                                     <button className="bg-white text-black font-black text-[10px] h-[58px] rounded-2xl tracking-[0.2em] uppercase hover:bg-cyan-500 transition-all active:scale-95 shadow-lg">ADICIONAR</button>
                                 </form>
 
-                                <div className="space-y-4">
+                                <div className="space-y-6">
                                     {processedAssets.filter(a => a.category === activeTab).map(asset => (
-                                        <div key={asset.id} className="bg-zinc-900/10 border border-zinc-900/50 p-6 rounded-[2rem] flex justify-between items-center group text-white hover:bg-zinc-900/20 transition-all">
-                                            <div className="flex items-center gap-6">
-                                                <div className="w-14 h-14 bg-white/5 rounded-2xl flex items-center justify-center font-black text-[11px] text-zinc-400 uppercase tracking-tighter border border-white/5">{asset.name.substring(0, 4)}</div>
-                                                <div><h4 className="font-black text-base text-white uppercase tracking-tight">{asset.name}</h4><p className="text-[9px] font-black text-zinc-600 uppercase mt-0.5">{asset.qty} UN • MÉDIO {formatBRL(asset.avgPrice)}</p></div>
+                                        <div key={asset.id} className="bg-zinc-900/15 border border-zinc-900 p-6 rounded-[2rem] flex flex-col gap-6 hover:bg-zinc-900/25 transition-all group border-l-4" style={{ borderLeftColor: STRATEGY.find(t => t.id === activeTab).color }}>
+                                            
+                                            {/* Cabeçalho do Ativo */}
+                                            <div className="flex justify-between items-start">
+                                                <div className="flex items-center gap-5">
+                                                    <div className="w-14 h-14 bg-white/5 rounded-2xl flex items-center justify-center font-black text-[11px] text-zinc-400 uppercase tracking-tighter border border-white/5">
+                                                        {asset.name.substring(0, 4)}
+                                                    </div>
+                                                    <div>
+                                                        <h4 className="font-black text-lg text-white uppercase tracking-tight flex items-center gap-2">
+                                                            {asset.name}
+                                                            <span className="text-[9px] bg-white/10 px-2 py-0.5 rounded text-zinc-500 uppercase tracking-widest">Ativo</span>
+                                                        </h4>
+                                                        <p className="text-[10px] font-bold text-zinc-600 uppercase mt-0.5 tracking-widest">Posição Detalhada</p>
+                                                    </div>
+                                                </div>
+                                                <button onClick={() => removeAsset(asset.id)} className="p-3 text-zinc-800 hover:text-rose-500 hover:bg-rose-500/10 rounded-xl transition-all active:scale-125">
+                                                    <Icons.Trash2 size={18} />
+                                                </button>
                                             </div>
-                                            <div className="flex items-center gap-8">
-                                                <div className="text-right text-white"><p className="font-black text-lg text-white tracking-tighter">{formatBRL(asset.totalCurrent)}</p><div className={`flex items-center justify-end gap-1 text-[10px] font-black ${asset.profitPerc >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{asset.profitPerc >= 0 ? <Icons.ArrowUpRight size={12} /> : <Icons.ArrowDownRight size={12} />}{asset.profitPerc.toFixed(2)}%</div></div>
-                                                <button onClick={() => removeAsset(asset.id)} className="p-3 text-zinc-800 hover:text-rose-500 hover:bg-rose-500/10 rounded-xl transition-all active:scale-125"><Icons.Trash2 size={18} /></button>
+
+                                            {/* Grid de Informações Solicitadas */}
+                                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-4 border-t border-zinc-900/50">
+                                                <div className="flex flex-col">
+                                                    <span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1">Quantidade</span>
+                                                    <span className="text-sm font-bold text-white">{asset.qty} UN</span>
+                                                </div>
+                                                <div className="flex flex-col">
+                                                    <span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1">Preço Médio</span>
+                                                    <span className="text-sm font-bold text-zinc-300">{formatBRL(asset.avgPrice)}</span>
+                                                </div>
+                                                <div className="flex flex-col">
+                                                    <span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1">Valor Atual</span>
+                                                    <span className="text-sm font-bold text-cyan-400">{formatBRL(asset.currentPrice)}</span>
+                                                </div>
+                                                <div className="flex flex-col">
+                                                    <span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1 text-right md:text-left">Total Investido</span>
+                                                    <span className="text-sm font-bold text-zinc-400 text-right md:text-left">{formatBRL(asset.totalInvested)}</span>
+                                                </div>
+                                                
+                                                <div className="flex flex-col">
+                                                    <span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1">Total Atual</span>
+                                                    <span className="text-sm font-black text-white">{formatBRL(asset.totalCurrent)}</span>
+                                                </div>
+                                                <div className="flex flex-col">
+                                                    <span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1">Lucro R$</span>
+                                                    <span className={`text-sm font-black flex items-center gap-1 ${asset.profitVal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                                        {asset.profitVal >= 0 ? <Icons.ArrowUpRight size={14} /> : <Icons.ArrowDownRight size={14} />}
+                                                        {formatBRL(asset.profitVal)}
+                                                    </span>
+                                                </div>
+                                                <div className="flex flex-col">
+                                                    <span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1">Lucro %</span>
+                                                    <span className={`text-sm font-black ${asset.profitPerc >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                                        {asset.profitPerc >= 0 ? '+' : ''}{asset.profitPerc.toFixed(2)}%
+                                                    </span>
+                                                </div>
                                             </div>
+
                                         </div>
                                     ))}
+                                    {processedAssets.filter(a => a.category === activeTab).length === 0 && (
+                                        <div className="py-24 text-center opacity-10">
+                                            <Icons.TrendingUp size={48} className="mx-auto mb-4" />
+                                            <p className="text-[10px] font-black uppercase tracking-[0.4em] text-zinc-400">Sem ativos na categoria</p>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         )}
