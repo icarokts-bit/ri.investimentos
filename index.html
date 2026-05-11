@@ -127,7 +127,6 @@
             { id: 'internacional', label: 'A - ALTERNATIVOS', color: '#EF4444', icon: Icons.Globe, desc: 'Mercado Global' }
         ];
 
-        // Lista de Tickers da B3 e Internacionais
         const POPULAR_TICKERS = [
             "PETR4", "PETR3", "VALE3", "ITUB4", "BBDC4", "BBDC3", "ABEV3", "BBAS3", "ITSA4", "B3SA3", "WEGE3", "MGLU3", "PRIO3", "SLCE3",
             "RENT3", "GGBR4", "CSNA3", "SUZB3", "JBSS3", "RAIL3", "RADL3", "EQTL3", "CPLE6", "TRPL4", "VIVT3", "TIMS3", "SBSP3", "ELET3", 
@@ -197,10 +196,8 @@
                 
                 setIsSyncing(true);
                 try {
-                    // Prepara tickers para busca no Google via Gemini
                     const tickersSearch = tabAssets.map(a => {
                         const name = a.name.toUpperCase();
-                        // Adiciona .SA para B3 se não tiver
                         if ((tabToSync === 'acoes' || tabToSync === 'realestate') && !name.includes('.')) {
                             return `${name}.SA`;
                         }
@@ -231,7 +228,6 @@
                         
                         for (const asset of tabAssets) {
                             const assetKey = asset.name.toUpperCase();
-                            // Tenta várias combinações para garantir que o valor seja encontrado
                             const priceFound = pricesMap[assetKey] || 
                                                pricesMap[assetKey + '.SA'] || 
                                                pricesMap[assetKey.replace('.SA', '')];
@@ -288,7 +284,6 @@
             const handleTickerChange = (val) => {
                 const upperVal = val.toUpperCase();
                 setNewAsset({...newAsset, name: upperVal});
-                
                 if (upperVal.length > 0) {
                     const filtered = POPULAR_TICKERS.filter(t => t.startsWith(upperVal)).slice(0, 6);
                     setSuggestions(filtered);
@@ -305,18 +300,33 @@
 
             const processedAssets = useMemo(() => assets.map(a => {
                 const totalInvested = a.qty * (a.avgPrice || 0);
-                const totalCurrent = a.qty * (a.currentPrice || 0);
-                const profitVal = totalCurrent - totalInvested;
-                return { ...a, totalInvested, totalCurrent, profitVal, profitPerc: totalInvested > 0 ? (profitVal / totalInvested) * 100 : 0 };
+                // Se o preço atual for zero, usamos o preço médio como estimativa inicial de valor para a soma
+                const priceForTotal = (a.currentPrice && a.currentPrice > 0) ? a.currentPrice : (a.avgPrice || 0);
+                const totalCurrent = a.qty * priceForTotal;
+                const profitVal = (a.currentPrice > 0) ? (totalCurrent - totalInvested) : 0;
+                
+                return { ...a, totalInvested, totalCurrent, profitVal, profitPerc: (totalInvested > 0 && a.currentPrice > 0) ? (profitVal / totalInvested) * 100 : 0 };
             }), [assets]);
 
             const totals = useMemo(() => {
-                const res = { acoes: 0, realestate: 0, caixa: 0, internacional: 0 };
-                processedAssets.forEach(a => { if(res[a.category] !== undefined) res[a.category] += a.totalCurrent; });
+                const res = { 
+                    acoes: { invested: 0, current: 0 }, 
+                    realestate: { invested: 0, current: 0 }, 
+                    caixa: { invested: 0, current: 0 }, 
+                    internacional: { invested: 0, current: 0 } 
+                };
+                processedAssets.forEach(a => { 
+                    if(res[a.category]) {
+                        res[a.category].invested += a.totalInvested;
+                        res[a.category].current += a.totalCurrent;
+                    }
+                });
                 return res;
             }, [processedAssets]);
 
-            const grandTotal = useMemo(() => Object.values(totals).reduce((a, b) => a + b, 0), [totals]);
+            const grandTotalCurrent = useMemo(() => Object.values(totals).reduce((a, b) => a + b.current, 0), [totals]);
+            const grandTotalInvested = useMemo(() => Object.values(totals).reduce((a, b) => a + b.invested, 0), [totals]);
+            
             const shareGoal = totalGoal / 4;
             const formatBRL = (v) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
 
@@ -344,8 +354,8 @@
                                     <svg viewBox="0 0 200 200" className="transform -rotate-90 w-full h-full drop-shadow-[0_0_25px_rgba(0,0,0,0.8)]">
                                         {STRATEGY.map((cat, i, arr) => {
                                             const r = 82; const circ = 2 * Math.PI * r;
-                                            const off = arr.slice(0, i).reduce((acc, c) => acc + (grandTotal > 0 ? (totals[c.id]/grandTotal)*circ : 0.25*circ), 0);
-                                            const stroke = grandTotal > 0 ? (totals[cat.id]/grandTotal)*circ : 0.25*circ;
+                                            const off = arr.slice(0, i).reduce((acc, c) => acc + (grandTotalCurrent > 0 ? (totals[c.id].current/grandTotalCurrent)*circ : 0.25*circ), 0);
+                                            const stroke = grandTotalCurrent > 0 ? (totals[cat.id].current/grandTotalCurrent)*circ : 0.25*circ;
                                             return <circle key={cat.id} cx="100" cy="100" r={r} fill="none" stroke={cat.color} strokeWidth="26" strokeDasharray={`${stroke} ${circ}`} strokeDashoffset={-off} className="donut-animation" />;
                                         })}
                                     </svg>
@@ -355,9 +365,18 @@
                                     </div>
                                 </div>
 
-                                <div className="bg-zinc-900/30 border border-zinc-900 p-8 rounded-[2.5rem] mb-10 flex justify-between items-end premium-shadow">
-                                    <div><p className="text-[10px] font-black text-zinc-500 tracking-[0.2em] mb-2 uppercase text-white">Património Atual</p><h3 className="text-4xl font-black tracking-tighter text-white">{formatBRL(grandTotal)}</h3></div>
-                                    <button onClick={() => setIsEditGoal(!isEditGoal)} className="p-4 bg-white/5 rounded-2xl text-cyan-400 hover:scale-105 active:scale-95 transition-all"><Icons.Edit3 size={20} /></button>
+                                <div className="bg-zinc-900/30 border border-zinc-900 p-8 rounded-[2.5rem] mb-10 grid grid-cols-1 md:grid-cols-2 gap-6 premium-shadow">
+                                    <div className="flex justify-between items-end">
+                                        <div>
+                                            <p className="text-[10px] font-black text-zinc-500 tracking-[0.2em] mb-2 uppercase text-white">Património Atualizado</p>
+                                            <h3 className="text-4xl font-black tracking-tighter text-white">{formatBRL(grandTotalCurrent)}</h3>
+                                        </div>
+                                        <button onClick={() => setIsEditGoal(!isEditGoal)} className="p-4 bg-white/5 rounded-2xl text-cyan-400 hover:scale-105 active:scale-95 transition-all"><Icons.Edit3 size={20} /></button>
+                                    </div>
+                                    <div className="border-l border-zinc-800 md:pl-6 flex flex-col justify-end">
+                                        <p className="text-[10px] font-black text-zinc-500 tracking-[0.2em] mb-1 uppercase text-white">Total Investido (Aplicações)</p>
+                                        <p className="text-xl font-bold text-zinc-400">{formatBRL(grandTotalInvested)}</p>
+                                    </div>
                                 </div>
 
                                 {isEditGoal && (
@@ -372,7 +391,7 @@
 
                                 <div className="space-y-4">
                                     {STRATEGY.map(cat => {
-                                        const total = totals[cat.id]; const diff = shareGoal - total;
+                                        const total = totals[cat.id].current; const diff = shareGoal - total;
                                         return (
                                             <button key={cat.id} onClick={() => setActiveTab(cat.id)} className="w-full bg-zinc-900/20 border border-zinc-900 p-6 rounded-[2rem] flex items-center justify-between group hover:bg-zinc-900/40 transition-all border-l-4" style={{ borderLeftColor: cat.color }}>
                                                 <div className="flex items-center gap-5">
@@ -380,7 +399,7 @@
                                                     <div className="text-left"><h4 className="text-[10px] font-black text-zinc-600 mb-1 uppercase">{cat.label}</h4><p className="text-xl font-black text-white">{formatBRL(total)}</p></div>
                                                 </div>
                                                 <div className="text-right">
-                                                    <div className="text-[10px] font-black text-zinc-500 mb-1.5">{grandTotal > 0 ? ((total/grandTotal)*100).toFixed(1) : 0}%</div>
+                                                    <div className="text-[10px] font-black text-zinc-500 mb-1.5">{grandTotalCurrent > 0 ? ((total/grandTotalCurrent)*100).toFixed(1) : 0}%</div>
                                                     <div className={`text-[9px] font-black px-3 py-1 rounded-full uppercase ${diff > 0 ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'}`}>
                                                         {diff > 0 ? `INVESTIR ${formatBRL(diff)}` : `EXCEDENTE ${formatBRL(Math.abs(diff))}`}
                                                     </div>
@@ -394,40 +413,22 @@
                             <div className="animate-in slide-in-from-right-4 duration-500">
                                 <div className="flex justify-between items-end mb-10 pb-8 border-b border-zinc-900 text-white">
                                     <div><h2 className="text-3xl font-black uppercase text-white tracking-tighter" style={{ color: STRATEGY.find(t => t.id === activeTab).color }}>{STRATEGY.find(t => t.id === activeTab).label}</h2></div>
-                                    <div className="flex items-center gap-4">
+                                    <div className="flex items-center gap-4 text-right">
                                         <button onClick={() => syncPrices()} disabled={isSyncing} className="p-3.5 bg-zinc-900 border border-zinc-800 rounded-xl text-cyan-400 hover:bg-zinc-800 active:scale-90 transition-all">{isSyncing ? <Icons.Loader2 size={20} /> : <Icons.RefreshCw size={20} />}</button>
-                                        <div className="text-right text-white"><p className="text-[9px] font-black text-zinc-700 uppercase">Total na Classe</p><p className="text-2xl font-black text-white tracking-tighter">{formatBRL(totals[activeTab])}</p></div>
+                                        <div className="text-white"><p className="text-[9px] font-black text-zinc-700 uppercase">Investido nesta Classe</p><p className="text-2xl font-black text-white tracking-tighter">{formatBRL(totals[activeTab].invested)}</p></div>
                                     </div>
                                 </div>
 
                                 <form onSubmit={addAsset} className="bg-zinc-900/20 border border-zinc-900 p-8 rounded-[2.5rem] mb-10 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 items-end text-white premium-shadow">
                                     <div className="space-y-2 relative" ref={suggestionRef}>
                                         <label className="text-[9px] font-black text-zinc-600 uppercase ml-3 tracking-widest">Ticker (B3/Global)</label>
-                                        <input 
-                                            required 
-                                            type="text" 
-                                            placeholder="EX: PETR4" 
-                                            value={newAsset.name} 
-                                            onChange={e => handleTickerChange(e.target.value)} 
-                                            onFocus={() => handleTickerChange(newAsset.name)}
-                                            className="w-full bg-black border border-zinc-800 rounded-2xl p-4 text-sm font-bold focus:border-cyan-500 outline-none text-white uppercase transition-all" 
-                                        />
-                                        
+                                        <input required type="text" placeholder="EX: PETR4" value={newAsset.name} onChange={e => handleTickerChange(e.target.value)} onFocus={() => handleTickerChange(newAsset.name)} className="w-full bg-black border border-zinc-800 rounded-2xl p-4 text-sm font-bold focus:border-cyan-500 outline-none text-white uppercase transition-all" />
                                         {showSuggestions && (
                                             <ul className="absolute top-full left-0 right-0 mt-2 bg-[#0A0A0A] border border-zinc-800 rounded-2xl overflow-hidden z-[100] shadow-2xl animate-in fade-in zoom-in-95 duration-200">
                                                 {suggestions.map((ticker, idx) => (
-                                                    <li 
-                                                        key={idx} 
-                                                        onClick={() => selectSuggestion(ticker)}
-                                                        className="px-6 py-4 hover:bg-cyan-500/10 cursor-pointer font-black text-xs text-zinc-300 border-b border-zinc-900 last:border-none flex justify-between items-center transition-colors"
-                                                    >
-                                                        <span className="flex items-center gap-2">
-                                                            <div className="w-1.5 h-1.5 rounded-full bg-cyan-500"></div>
-                                                            {ticker}
-                                                        </span>
-                                                        <span className="text-[8px] text-zinc-700 uppercase tracking-widest">
-                                                            {(ticker.length >= 5 && !ticker.includes('.')) || ticker.includes('11') ? 'B3 BRASIL' : 'GLOBAL'}
-                                                        </span>
+                                                    <li key={idx} onClick={() => selectSuggestion(ticker)} className="px-6 py-4 hover:bg-cyan-500/10 cursor-pointer font-black text-xs text-zinc-300 border-b border-zinc-900 last:border-none flex justify-between items-center transition-colors">
+                                                        <span className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-cyan-500"></div>{ticker}</span>
+                                                        <span className="text-[8px] text-zinc-700 uppercase tracking-widest">{(ticker.length >= 5 && !ticker.includes('.')) || ticker.includes('11') ? 'B3 BRASIL' : 'GLOBAL'}</span>
                                                     </li>
                                                 ))}
                                             </ul>
@@ -451,9 +452,9 @@
                                             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-4 border-t border-zinc-900/50">
                                                 <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1 text-white">Quantidade</span><span className="text-sm font-bold text-white">{asset.qty} UN</span></div>
                                                 <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1 text-white">Preço Médio</span><span className="text-sm font-bold text-zinc-300">{formatBRL(asset.avgPrice)}</span></div>
-                                                <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1 text-white">Valor Atual</span><span className="text-sm font-bold text-cyan-400">{formatBRL(asset.currentPrice)}</span></div>
+                                                <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1 text-white">Valor Atual</span><span className="text-sm font-bold text-cyan-400">{(asset.currentPrice > 0) ? formatBRL(asset.currentPrice) : 'Aguardando Sinc...'}</span></div>
                                                 <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1 text-white">Total Investido</span><span className="text-sm font-bold text-zinc-400">{formatBRL(asset.totalInvested)}</span></div>
-                                                <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1 text-white">Total Atual</span><span className="text-sm font-black text-white">{formatBRL(asset.totalCurrent)}</span></div>
+                                                <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1 text-white">Valor em Carteira</span><span className="text-sm font-black text-white">{formatBRL(asset.totalCurrent)}</span></div>
                                                 <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1 text-white">Lucro R$</span><span className={`text-sm font-black flex items-center gap-1 ${asset.profitVal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{asset.profitVal >= 0 ? <Icons.ArrowUpRight size={14} /> : <Icons.ArrowDownRight size={14} />}{formatBRL(asset.profitVal)}</span></div>
                                                 <div className="flex flex-col"><span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest mb-1 text-white">Lucro %</span><span className={`text-sm font-black ${asset.profitPerc >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{asset.profitPerc >= 0 ? '+' : ''}{asset.profitPerc.toFixed(2)}%</span></div>
                                             </div>
